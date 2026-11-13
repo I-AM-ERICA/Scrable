@@ -1,0 +1,12 @@
+{
+  "backend": "local",
+  "model": "naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-1.5B",
+  "device": "auto",
+  "train_size": 10,
+  "validation_size": 4,
+  "test_size": 4,
+  "knowledge_size": 64,
+  "max_iterations": 2,
+  "threshold": 0.95,
+  "output_dir": "outputs/hyperclova"
+}
