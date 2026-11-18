@@ -1,0 +1,43 @@
+{
+  "_comment": "Rejected = small model's accurate but generic answer when one exists, so pairs teach 'use the store info' rather than 'avoid mistakes'; sft_weight 0.5.",
+  "base": {
+    "backend": "local",
+    "model": "naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-1.5B",
+    "judge_backend": "anthropic",
+    "judge_model": "claude-haiku-5-5",
+    "judge_workers": 8,
+    "device": "auto",
+    "custom_data": "data/dpo_reviews.jsonl",
+    "documents_dir": "data/train_store_docs",
+    "base_prompt_file": "prompts/stage1_best_prompt.txt",
+    "embedding_model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+    "knowledge_size": 0,
+    "top_k": 2,
+    "output_dir": "outputs/stage3_generic"
+  },
+  "samples_per_review": 3,
+  "temperature": 0.8,
+  "top_p": 0.95,
+  "teacher_models": [
+    {
+      "backend": "anthropic",
+      "model": "claude-haiku-5-5"
+    }
+  ],
+  "min_margin": 0.15,
+  "min_chosen_score": 0.6,
+  "beta": 0.1,
+  "sft_weight": 0.5,
+  "learning_rate": 5e-05,
+  "epochs": 2,
+  "grad_accum": 8,
+  "max_length": 2048,
+  "eval_fraction": 0.1,
+  "lora_r": 16,
+  "lora_alpha": 32,
+  "lora_dropout": 0.05,
+  "candidates_from": "outputs/stage2",
+  "rejected_strategy": "generic_or_lowest",
+  "min_chosen_specificity": 4,
+  "min_specificity_gap": 2
+}

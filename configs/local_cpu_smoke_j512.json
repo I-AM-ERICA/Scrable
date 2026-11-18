@@ -1,0 +1,11 @@
+{
+  "device": "cpu",
+  "train_size": 2,
+  "validation_size": 1,
+  "test_size": 1,
+  "knowledge_size": 8,
+  "max_iterations": 1,
+  "top_k": 2,
+  "output_dir": "outputs/local_cpu_smoke_j512",
+  "judge_tokens": 512
+}

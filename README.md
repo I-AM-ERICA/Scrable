@@ -2,7 +2,8 @@
 
 HyperCLOVA 1.5B 기반 고객 리뷰 답변 생성·평가·프롬프트 최적화 구현입니다.
 사용자가 제시한 Algorithm 1/2와 RAG 흐름을 모듈로 구성했습니다.
-**가중치 fine-tuning/LoRA가 아닌, 평가 피드백을 이용한 프롬프트 학습**입니다.
+1단계는 **가중치 학습 없이 평가 피드백으로 프롬프트를 학습**하고, 2단계는 같은 채점기 점수로 만든
+선호 쌍으로 **1.5B에 LoRA DPO**를 적용합니다.
 
 ## 빠른 시작
 
@@ -55,21 +56,159 @@ python -m scrable.experiment --config configs/hyperclova.json
 python -m scrable.experiment --prepare-only
 ```
 
+## 1단계 실험: API 채점기 + 작은 답변 생성기
+
+> **처음 실행한다면 [RUN_STAGE1.md](RUN_STAGE1.md)를 먼저 보세요.** 서버로 복사, Hugging Face 토큰, API 키 입력, 결과 받기까지 순서대로 설명합니다.
+
+1.5B 모델 하나가 답변·채점·프롬프트 수정을 모두 맡으면 채점이 불안정해서 반복 최적화가 노이즈를 따라갑니다.
+1단계에서는 역할을 나눕니다.
+
+| 역할 | 설정 키 | 1단계 기본값 |
+|---|---|---|
+| 답변 생성기 (서비스에 올릴 모델) | `backend`, `model` | `local` / HyperCLOVAX-SEED 1.5B |
+| 채점기 (LLM-as-a-Judge) | `judge_backend`, `judge_model` | `anthropic` / `claude-haiku-5-5` |
+| 프롬프트 개선기 | `prompt_backend`, `prompt_model` | `anthropic` / `claude-haiku-5-5` |
+| 비교 대상 (상한선) | `compare_models` | 큰 모델이 같은 테스트 리뷰에 기본 프롬프트로 답변 |
+
+- `backend` 값은 `local`, `openai`(OpenAI 호환 API), `anthropic`(Claude) 중 하나입니다. 역할마다 다르게 고를 수 있습니다.
+- `judge_backend`/`prompt_backend`를 생략하면 `backend`와 같습니다. 다르게 지정하면 `*_model`도 반드시 적어야 합니다.
+- `judge_workers`: API 채점 요청을 병렬로 보냅니다. 로컬 채점기에서는 1이어야 합니다.
+- `api_min_output_tokens`(기본 16000): API 모델은 출력 토큰 일부를 내부 추론에 쓰므로, 역할별 토큰 한도를 이 값 이상으로 올려서 보냅니다.
+- `anthropic_effort`: Claude 추론 깊이(`low`~`max`). 비우면 모델 기본값을 씁니다.
+- 더 강한 채점기가 필요하면 `claude-sonnet-5-5`(약 20배 비용) 등으로 바꿀 수 있습니다. Opus 5.5 / Sonnet 5.5 등 지원 모델에는 서버 측 거절 대체(`fallbacks="default"`)가 켜집니다.
+- OpenAI를 쓰려면 `*_backend`를 `openai`, `*_model`을 사용할 모델 ID로 바꾸고 `OPENAI_API_KEY`를 설정하세요.
+
+### 매장 리뷰 데이터 준비
+
+`data/`는 Git에 올라가지 않으므로 실제 리뷰와 가게 정보는 여기에 둡니다. 형식 예시는 `examples/`에 있습니다(가상 매장).
+
+```text
+data/store_reviews.jsonl            # 한 줄에 리뷰 하나
+data/store_docs/<store_id>/*.md     # 매장별 정보(메뉴, 영업시간, 배달·환불 안내). 폴더 이름 = app_id
+```
+
+```json
+{"id": "r001", "app_id": "store-001", "rating": 2, "review": "배달이 1시간 넘게 걸렸어요.", "expert_response": null}
+```
+
+- `app_id`는 매장 ID입니다. 리뷰는 같은 이름의 `data/store_docs/<store_id>/` 문서만 검색합니다.
+- `rating`(1~5)과 `expert_response`(사장님이 실제로 단 답글)는 선택입니다.
+- `configs/stage1_claude_judge.json` 기준으로 중복 없는 리뷰가 **최소 80건**(train 30 / validation 10 / test 40) 필요합니다.
+- 리뷰 수집은 플랫폼 약관을 확인하세요. 팀이 직접 작성하거나 합성 후 검수한 리뷰, 협조 매장 데이터를 권장합니다.
+
+### GPU 서버에서 실행
+
+Windows PowerShell에서 코드를 묶어 서버로 보냅니다(`.venv`, `outputs`, `data` 제외).
+
+```powershell
+tar -czf "$env:USERPROFILE\Downloads\scrable_stage1.tgz" --exclude=.venv --exclude=outputs --exclude=data --exclude=*.egg-info -C "$env:USERPROFILE\naver_AI_service" scrable
+scp "$env:USERPROFILE\Downloads\scrable_stage1.tgz" root@<서버 IP>:/opt/scrable/
+```
+
+서버에서:
+
+```bash
+cd /opt/scrable && mkdir -p scrable_stage1 && tar -xzf scrable_stage1.tgz -C scrable_stage1 --strip-components=1
+cd scrable_stage1
+PYTHON_BIN=python3.10 bash scripts/setup_gpu.sh     # 처음 한 번
+read -rs ANTHROPIC_API_KEY && export ANTHROPIC_API_KEY   # 키를 화면·히스토리에 남기지 않고 입력
+
+# 1) 예시 6건으로 연결만 확인 (API 호출 약 50회)
+.venv/bin/python -m scrable.experiment --config configs/stage1_smoke_example.json
+
+# 2) data/ 를 채운 뒤 본 실험
+.venv/bin/python -m scrable.experiment --config configs/stage1_claude_judge.json
+```
+
+HyperCLOVA 접근 토큰은 이전에 `hf auth login`을 했다면 서버의 Hugging Face 캐시에 이미 저장돼 있습니다.
+
+### 결과 읽기
+
+실행이 끝나면 테스트 점수표가 출력됩니다(0~1, 채점기 기준).
+
+```text
+generator                         prompt     overall   relevancy specificity accuracy grammar
+local:...HyperCLOVAX-1.5B         base         ...
+local:...HyperCLOVAX-1.5B         optimized    ...
+anthropic:claude-haiku-5-5        base         ...
+```
+
+- **base → optimized** 차이가 SCRABLE 프롬프트 최적화의 효과입니다.
+- **optimized와 큰 모델의 차이**가 작은 모델이 아직 따라잡지 못한 정도입니다.
+- 원본 답변과 채점 근거는 `outputs/stage1/test_predictions.json`, 반복별 기록은 `history.json`에 있습니다.
+- 이 점수는 LLM 채점기 점수입니다. 사람 평가와의 일치도는 별도로 확인해야 합니다.
+
+호출 수(캐시 제외): 채점 `4 × ((train + validation) × (max_iterations + 1) + test × (2 + 비교 모델 수))`회,
+프롬프트 수정 `max_iterations`회, 비교 모델 답변 `test × 비교 모델 수`회입니다. `stage1_claude_judge.json`은
+채점 약 1,120회입니다. 같은 `output_dir`로 다시 실행하면 완료된 호출은 `llm_cache/`에서 재사용합니다.
+
+## 2단계 실험: 채점 점수로 만든 선호 쌍 + LoRA DPO
+
+처음 실행한다면 **[RUN_STAGE2.md](RUN_STAGE2.md)** 를 따라 하세요.
+
+1단계에서 프롬프트로는 1.5B의 정확성이 오르지 않았습니다(0.662 → 0.669, 테스트 40건). 2단계는
+1.5B가 실제로 자주 내는 나쁜 답을 직접 학습 신호로 씁니다.
+
+1. `python -m scrable.synth_reviews`: 학습용 가상 매장 4곳(`data/train_store_docs/`)의 합성 리뷰를 만듭니다.
+   테스트 매장(`data/store_docs/`)과 겹치지 않아, 점수가 오르면 매장 정보를 외운 것이 아니라 답글 습관이
+   나아진 것입니다.
+2. `python -m scrable.dpo pairs`: 리뷰마다 1.5B 샘플 답변 여러 개와 교사 모델(Haiku) 답변을 1단계와 같은
+   채점기로 채점해 (가장 좋은 답, 1.5B의 가장 나쁜 답)을 선호 쌍으로 저장합니다.
+3. `python -m scrable.dpo train`: LoRA DPO 학습. DPO 손실은 `scrable/dpo.py`에 직접 구현했습니다
+   (최신 TRL은 transformers 5 기준이라 이 프로젝트의 transformers 4와 맞지 않음). 기준 모델 확률은
+   어댑터를 끈 같은 모델로 계산합니다. chosen 답에 작은 NLL 항(`sft_weight`)을 더합니다.
+4. `python -m scrable.evaluate`: 1단계와 같은 테스트 40건·같은 프롬프트·같은 채점기로 평가하고, 1단계 결과와
+   리뷰별로 짝지어 부트스트랩 95% 신뢰구간을 출력합니다.
+
+설정: `configs/stage2_dpo.json`(쌍 생성·학습), `configs/stage2_eval.json`(평가, `response_adapter`로
+어댑터 지정). 추가 설치: `pip install -e '.[dpo]'`(peft).
+
+## 3단계 실험: 구체성 개선
+
+처음 실행한다면 **[RUN_STAGE3.md](RUN_STAGE3.md)** 를 따라 하세요.
+
+2단계 모델은 가게 정보를 입력으로 받고도 답에 잘 쓰지 않았습니다. 3단계는 2단계의 채점된 후보
+(`outputs/stage2/candidates.jsonl`)를 API 호출 없이 다시 골라(`python -m scrable.dpo select`) 학습 방법만
+바꾼 변형 3개(`configs/stage3_*.json`)를 학습합니다. 변형 선택은 테스트가 아닌 dev 세트
+(`python -m scrable.evaluate --split dev`, 1단계 train + validation)로 하고, 고른 1개만 테스트 40건으로 평가합니다.
+
+## 메일 자동 답장 시험
+
+처음 실행한다면 **[RUN_EMAIL.md](RUN_EMAIL.md)** 를 따라 하세요.
+
+테스트 가게 4곳마다 가상 고객 메일 10종류(`python -m scrable.synth_emails`, 가게 정보로 못 답하는 메일과
+메일 속 지시가 섞인 메일 포함)를 만들고, 원래 1.5B·2단계 LoRA·Haiku의 답장을 같은 채점기로 비교합니다.
+설정의 `"channel": "email"`은 생성기 입력 키와 채점 기준 문구만 메일용으로 바꿉니다.
+`scripts/email_report.py`는 종류별 점수와 지어낸 답(정확성 2점 이하) 수를 보여 줍니다.
+
 ## 파일 구성
 
 ```text
 train.ipynb              전체 실행 노트북
-configs/hyperclova.json  CLI 설정
+configs/hyperclova.json  CLI 설정 (1.5B 단독, 기존 방식)
+configs/stage1_*.json    1단계: API 채점기 + 1.5B 생성기 (본 실험 / 예시 연결 확인)
+configs/stage2_*.json    2단계: 선호 쌍·LoRA DPO 학습 / 학습된 어댑터 평가
+configs/stage3_*.json    3단계: 구체성 개선 변형 (sft1 / spec / generic)
+configs/email_*.json     메일 자동 답장 시험 (1.5B·LoRA / Haiku)
+prompts/email_prompt.txt 메일 답장용 프롬프트
+prompts/store_base_prompt.txt  매장 리뷰용 기본 프롬프트
+prompts/stage1_best_prompt.txt 1단계 본 실험이 고른 프롬프트 (2단계 학습·평가에 사용)
+examples/                매장 리뷰 JSONL·매장 문서 형식 예시(가상 매장)
 scrable/
   config.py             모델·데이터·최적화 설정
   data.py               다운로드, JSONL 로드, 분할, TXT/MD/PDF 로드
-  llm.py                Transformers/OpenAI 호환 API, 캐시, JSON 재시도
+  llm.py                Transformers/OpenAI 호환 API, 역할별 백엔드, 캐시, JSON 재시도
+  anthropic_llm.py      Claude(Anthropic SDK) 백엔드
   prompts.py            기본 프롬프트와 고정 평가 기준
   pipeline.py           ResponseGen, Judge, ScoredResponseGen, IdentifyIR, PromptGen
   optimizer.py          Algorithm 1 반복 최적화
   rag.py                LangChain 분할, 임베딩, BM25+벡터 검색
   azure_rag.py           선택적 Azure AI Search
   experiment.py         실험 실행·독립 테스트 평가·결과 저장
+  synth_reviews.py      2단계 학습용 합성 리뷰 생성
+  synth_emails.py       메일 시험용 합성 고객 메일 생성
+  dpo.py                2단계 선호 쌍 생성과 LoRA DPO 학습
+  evaluate.py           테스트 평가와 이전 결과와의 짝지은 부트스트랩 비교
 tests/                  계산, 데이터 격리, 종료 조건, 통합 검증
 scripts/setup_gpu.sh     서버 환경 설치
 scripts/make_notebook.py 노트북 생성기
@@ -88,6 +227,7 @@ scripts/smoke_notebook.py 테스트용 LLM으로 노트북 실행 흐름 검증
 Judge는 관련성·앱 특화성·정확도·문법을 **각각 별도 호출**로 1~5점 채점합니다.
 `(raw - 1) / 4`로 정규화하고 `1:1:2:1` 가중 평균을 계산합니다. threshold는 0~1 값입니다.
 해당 리뷰의 참고 답변은 **정확도 Judge에만** 제공하고 ResponseGen에는 제공하지 않습니다.
+검색 문서(가게 정보)는 **구체성·정확도 Judge**에 제공합니다. 문서에 있는 내용을 지어낸 것으로 감점하지 않기 위해서입니다.
 잘못된 JSON/점수는 수정 요청으로 재시도하고, 실패하면 오류로 중단합니다. 임의 점수를 만들지 않습니다.
 
 validation은 프롬프트 생성에 사용하지 않고 최종 프롬프트 선택에만 사용합니다. 동점이면 앞선 프롬프트를 선택합니다.
