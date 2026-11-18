@@ -11,3 +11,6 @@ outputs/
 dist/
 build/
 .DS_Store
+
+# Generated from scrable/proto by scrable/grpc_gen.py
+scrable/_grpc_gen/

@@ -181,6 +181,14 @@ anthropic:claude-haiku-5-5        base         ...
 설정의 `"channel": "email"`은 생성기 입력 키와 채점 기준 문구만 메일용으로 바꿉니다.
 `scripts/email_report.py`는 종류별 점수와 지어낸 답(정확성 2점 이하) 수를 보여 줍니다.
 
+## 백엔드 연결: gRPC 서버
+
+처음 실행한다면 **[RUN_SERVE.md](RUN_SERVE.md)** 를 따라 하세요.
+
+팀 백엔드(am-erica-backend)가 부르는 `CustomerAssistant.DraftReply`(gRPC, 포트 50053)를 2단계 모델로
+구현했습니다(`python -m scrable.serve`). 약속서는 백엔드의 `customer.proto`를 그대로 복사한
+`scrable/proto/`이고, 표준 gRPC 헬스체크와 `x-internal-key` 인증을 지원합니다. 설치: `pip install -e '.[serve]'`.
+
 ## 파일 구성
 
 ```text
@@ -209,6 +217,11 @@ scrable/
   synth_emails.py       메일 시험용 합성 고객 메일 생성
   dpo.py                2단계 선호 쌍 생성과 LoRA DPO 학습
   evaluate.py           테스트 평가와 이전 결과와의 짝지은 부트스트랩 비교
+  serve.py              백엔드용 gRPC 서버 (CustomerAssistant.DraftReply)
+  grpc_gen.py           proto에서 gRPC 파이썬 코드 생성
+  proto/                백엔드에서 복사한 gRPC 약속서 (america/ai/v1)
+configs/serve.json       gRPC 서버 설정 (2단계 모델, 가게 문서, 포트)
+scripts/grpc_client.py   백엔드처럼 서버를 불러 보는 시험 프로그램
 tests/                  계산, 데이터 격리, 종료 조건, 통합 검증
 scripts/setup_gpu.sh     서버 환경 설치
 scripts/make_notebook.py 노트북 생성기

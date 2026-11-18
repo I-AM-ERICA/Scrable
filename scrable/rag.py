@@ -116,6 +116,8 @@ class HybridRetriever:
             for rank, i in enumerate(sorted(eligible, key=lambda j: (-float(values[j]), j)), 1):
                 fused[i] += 1 / (60 + rank)
         chosen = sorted(eligible, key=lambda i: (-fused[i], i))[:top_k]
+        if len(self._query_cache) >= 4096:  # A long-running server sees endless unique reviews.
+            self._query_cache.clear()
         self._query_cache[key] = [self.chunks[i] for i in chosen]
         return self._query_cache[key]
 
