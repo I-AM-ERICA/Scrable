@@ -35,7 +35,7 @@ python -m venv .venv
 
 캐시(`llm_cache`, `rag`), 사람 평가 응답, 사진은 올리지 않습니다. 실험을 다시 돌리면 `outputs/` 아래에 새로 생깁니다.
 
-**학습한 최종 모델(LoRA 어댑터, 62MB)은 레포에 없습니다.** 모델이 커질수록 파일도 커지고 Git 기록에 계속 남기 때문입니다. **팀 구글 드라이브**에 `scrable-stage2-adapter.zip`으로 올려 두었습니다(링크는 팀 공지 참고). 압축을 풀어 나온 `adapter/` 폴더를 `outputs/stage2/adapter/`에 넣으면 RUN_SERVE.md가 그대로 동작합니다. 직접 만들려면 레포의 학습 쌍으로 2단계 학습을 다시 하면 됩니다(GPU 수 분, API 비용 없음).
+**학습한 최종 모델(LoRA 어댑터, 62MB)은 레포에 없습니다.** 모델이 커질수록 파일도 커지고 Git 기록에 계속 남기 때문입니다. **구글 드라이브**에 `scrable-stage2-adapter.zip`으로 올려 두었습니다(공유 링크는 팀 공지 참고). 압축을 풀어 나온 `adapter/` 폴더를 `outputs/stage2/adapter/`에 넣으면 RUN_SERVE.md가 그대로 동작합니다. 직접 만들려면 레포의 학습 쌍으로 2단계 학습을 다시 하면 됩니다(GPU 수 분, API 비용 없음).
 
 ## 빠른 시작
 
