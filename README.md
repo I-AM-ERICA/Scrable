@@ -5,6 +5,38 @@ HyperCLOVA 1.5B 기반 고객 리뷰 답변 생성·평가·프롬프트 최적�
 1단계는 **가중치 학습 없이 평가 피드백으로 프롬프트를 학습**하고, 2단계는 같은 채점기 점수로 만든
 선호 쌍으로 **1.5B에 LoRA DPO**를 적용합니다.
 
+## 처음 받은 팀원용
+
+```bash
+git clone -b stage1-api-judge https://github.com/I-AM-ERICA/Scrable.git
+cd Scrable
+python -m venv .venv
+.venv/bin/pip install -e ".[local,dpo,anthropic,serve,dev]"   # Windows: .venv\Scripts\pip
+```
+
+| 하고 싶은 것 | 필요한 것 | 방법 |
+|---|---|---|
+| 코드가 맞게 받아졌는지 확인 | 없음 (CPU로 1분 안쪽) | `.venv/bin/python -m pytest -q` |
+| 실험 결과 숫자 보기 | 없음 | `outputs/` 아래 결과 파일 (아래 표) |
+| 백엔드용 답글 서버 켜기 | GPU, HyperCLOVA 모델 접근 동의, 학습한 어댑터 (아래 참고) | [RUN_SERVE.md](RUN_SERVE.md) |
+| 2단계 학습 다시 하기 | GPU | `python -m scrable.dpo train --config configs/stage2_dpo.json` (학습 쌍이 레포에 있어 API 비용 없음) |
+| 실험 처음부터 다시 하기 | GPU, `ANTHROPIC_API_KEY` (채점 비용 발생) | [RUN_STAGE1.md](RUN_STAGE1.md) → [RUN_STAGE2.md](RUN_STAGE2.md) → [RUN_STAGE3.md](RUN_STAGE3.md) |
+
+**레포에 들어 있는 데이터와 결과** (모두 실험용 합성 데이터, 실제 고객 리뷰·사진 없음. 출처는 [data/DATA_SOURCE.md](data/DATA_SOURCE.md))
+
+| 경로 | 내용 |
+|---|---|
+| `data/store_reviews.jsonl`, `data/store_docs/` | 평가용 합성 리뷰 92건, 가상 매장 4곳 |
+| `data/train_store_docs/`, `data/dpo_reviews.jsonl` | 2단계 학습용 가상 매장 4곳, 합성 리뷰 |
+| `outputs/stage1/test_predictions.json` | 1단계 결과 (1.5B 기본·최적화 프롬프트, Haiku 비교) |
+| `outputs/stage2/pairs.jsonl`, `pairs_summary.json`, `train_log.json` | 2단계 학습 쌍 316개와 학습 기록 |
+| `outputs/stage2_eval/` | 2단계 최종 모델 테스트 결과 (0.752) |
+| `outputs/dev/`, `outputs/email/`, `outputs/photo_eval*/` | 3단계 변형, 메일, 사진 리뷰 실험 결과 |
+
+캐시(`llm_cache`, `rag`), 사람 평가 응답, 사진은 올리지 않습니다. 실험을 다시 돌리면 `outputs/` 아래에 새로 생깁니다.
+
+**학습한 최종 모델(LoRA 어댑터, 62MB)은 레포에 없습니다.** 모델이 커질수록 파일도 커지고 Git 기록에 계속 남기 때문입니다. **팀 구글 드라이브**에 `scrable-stage2-adapter.zip`으로 올려 두었습니다(링크는 팀 공지 참고). 압축을 풀어 나온 `adapter/` 폴더를 `outputs/stage2/adapter/`에 넣으면 RUN_SERVE.md가 그대로 동작합니다. 직접 만들려면 레포의 학습 쌍으로 2단계 학습을 다시 하면 됩니다(GPU 수 분, API 비용 없음).
+
 ## 빠른 시작
 
 프로젝트 **전체 폴더**를 GPU 서버에 복사하고 [train.ipynb](train.ipynb)를 열어 **Run All**을 실행하세요.
