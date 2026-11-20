@@ -1,5 +1,5 @@
 {
-  "_comment": "Stage 4 photo reviews: Mendeley photo-review text + labelled food photos of the ordered dish. Vision-3B describes each photo; the description goes into the generator input. Train step trains photo pairs + stage-4 text pairs + stage-2 pairs into one adapter (outputs/stage4_photo/adapter).",
+  "_comment": "Stage 4 photo reviews: Mendeley photo-review text + labelled food photos of the ordered dish. Vision-3B describes each photo; the description goes into the generator input. Train step trains photo pairs + stage-2 pairs (stage-4 text pairs gave no gain) into one adapter (outputs/stage4_photo/adapter).",
   "base": {
     "backend": "local",
     "model": "naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-1.5B",
@@ -39,7 +39,6 @@
   "lora_dropout": 0.05,
   "min_chosen_specificity": 3,
   "extra_pairs": [
-    "outputs/stage4/pairs.jsonl",
     "outputs/stage2/pairs.jsonl"
   ]
 }

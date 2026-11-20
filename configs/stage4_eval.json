@@ -5,7 +5,7 @@
   "response_adapter": "outputs/stage4/adapter",
   "judge_backend": "anthropic",
   "judge_model": "claude-haiku-5-5",
-  "judge_workers": 8,
+  "judge_workers": 4,
   "device": "auto",
   "custom_data": "data/store_reviews.jsonl",
   "documents_dir": "data/store_docs",

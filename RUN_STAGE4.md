@@ -299,13 +299,13 @@ grep -A12 '"reviews"' stage4_photo_pairs.log | head -n 20
 
 ### 13-7. [서버] 한 번에 학습 (15~25분)
 
-사진 쌍 + 4단계 글 쌍(`outputs/stage4/pairs.jsonl`, 1000건으로 늘렸으면 그 결과) + 2단계 쌍을 같이 학습합니다.
+사진 쌍 + 2단계 쌍을 같이 학습합니다. 4단계 글 쌍은 효과가 없어서 넣지 않습니다(결과 차이가 사진 때문인지 분명하게 보려고).
 
 ```bash
 nohup .venv/bin/python -m scrable.dpo train --config configs/stage4_photo_dpo.json > stage4_photo_train.log 2>&1 &
 ```
 
-`Training pairs by file:`에 파일 세 개가 다 나와야 합니다.
+`Training pairs by file:`에 사진 쌍과 2단계 쌍(316개) 두 파일이 나와야 합니다.
 
 ### 13-8. [서버] 평가 (약 30분)
 

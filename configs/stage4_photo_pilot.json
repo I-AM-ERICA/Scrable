@@ -39,7 +39,6 @@
   "lora_dropout": 0.05,
   "min_chosen_specificity": 3,
   "extra_pairs": [
-    "outputs/stage4/pairs.jsonl",
     "outputs/stage2/pairs.jsonl"
   ]
 }
