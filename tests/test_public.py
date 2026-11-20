@@ -132,6 +132,12 @@ def test_menu_matching_uses_dish_names_only():
     assert food_of("부대찌개/1(라면사리 추가)", foods) == "부대찌개"
     assert food_of("짜글이/1,라면사리/1", foods) is None
     assert food_of("물냉면/2", foods) == "물냉면"
+    # Only the main dish counts: event items are skipped, side orders and longer dishes ignored.
+    more = ["식혜", "육회", "순대", "새우튀김", "찜닭"]
+    assert food_of("제육볶음세트/1,공기밥/1,식혜238mL/1", more) is None
+    assert food_of("스시고칸100원의행복[찜&후기작성]2VENT/1,육회비빔밥/1", more) is None
+    assert food_of("순대국/1,설렁탕/1", more) is None
+    assert food_of("[프리미엄]까만／빨간찜닭/1,15cm왕새우튀김2개/2", more) == "찜닭"
 
 
 def test_photo_reviews_get_dish_photos_and_skip_test_stores(tmp_path):

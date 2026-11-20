@@ -106,10 +106,30 @@ def menu_names(menu):
     return re.sub(r"[가-힣]*사리", "", squash(text))
 
 
+EVENT_ITEM = re.compile(r"이벤트|EVENT|VENT|후기|리뷰|찜&|서비스", re.IGNORECASE)
+# A food name followed by one of these is a different dish: 순대국 is not 순대, 육회비빔밥 not 육회.
+LONGER_DISH = ("국", "탕", "전골", "찌개", "볶음밥", "덮밥", "비빔밥", "국수", "라면")
+
+
+def main_item(menu):
+    """The first ordered dish (the main one): event/review-promise items are skipped, and side
+    orders after it (drinks, 새우튀김 추가, 공기밥) are ignored."""
+    for item in menu_names(menu).split(","):
+        name = item.split("/")[0]
+        if name and not EVENT_ITEM.search(name):
+            return name
+    return ""
+
+
 def food_of(menu, foods):
-    """Longest food name found in the ordered dish names (물냉면 wins over 냉면), or None."""
-    menu = menu_names(menu)
-    found = [f for f in foods if squash(f) in menu]
+    """Longest food name in the main dish (물냉면 wins over 냉면), or None."""
+    item = main_item(menu)
+    found = []
+    for food in foods:
+        key = squash(food)
+        start = item.find(key)
+        if start >= 0 and not item[start + len(key) :].startswith(LONGER_DISH):
+            found.append(food)
     return max(found, key=len) if found else None
 
 
