@@ -45,6 +45,18 @@ def check_image(path):
     return path
 
 
+def media_type_of(data, path):
+    """Media type from the file's first bytes; the extension can lie (AI Hub has PNGs named .jpg,
+    which the API rejects as a media-type mismatch). Falls back to the extension."""
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return MEDIA_TYPES[Path(path).suffix.lower()]
+
+
 def image_bytes(path, max_side=MAX_SIDE):
     """(bytes, media type), downscaled so the long side is at most max_side when Pillow is present."""
     path = check_image(path)
@@ -52,10 +64,10 @@ def image_bytes(path, max_side=MAX_SIDE):
     try:
         from PIL import Image
     except ImportError:
-        return data, MEDIA_TYPES[path.suffix.lower()]
+        return data, media_type_of(data, path)
     with Image.open(io.BytesIO(data)) as image:
         if max(image.size) <= max_side:
-            return data, MEDIA_TYPES[path.suffix.lower()]
+            return data, media_type_of(data, path)
         image = image.convert("RGB")
         image.thumbnail((max_side, max_side))
         out = io.BytesIO()

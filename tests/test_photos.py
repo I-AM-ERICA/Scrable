@@ -212,3 +212,13 @@ def test_photo_review_styles_add_rows_with_style_ratings(tmp_path):
     assert [style_of(r["id"]) for r in rows] == ["photo", "short", "complaint"]
     with pytest.raises(ValueError, match="Unknown style"):
         generate(writer, docs, find_photos(tmp_path / "photos"), styles=("long",))
+
+
+def test_media_type_comes_from_file_content_not_extension(tmp_path):
+    from scrable.photos import media_type_of
+
+    misnamed = tmp_path / "png_named.jpg"
+    misnamed.write_bytes(FAKE_PNG)
+    assert media_type_of(FAKE_PNG, misnamed) == "image/png"
+    assert media_type_of(b"\xff\xd8\xff\xe0rest", tmp_path / "x.png") == "image/jpeg"
+    assert media_type_of(b"unknown", tmp_path / "x.webp") == "image/webp"
