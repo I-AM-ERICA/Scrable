@@ -57,6 +57,9 @@ class DPOConfig:
     generic_max_specificity: int = 2
     min_chosen_specificity: int | None = None  # raw 1-5 judge score
     min_specificity_gap: int | None = None  # chosen minus rejected specificity, raw 1-5
+    # Photo reviews: the photo's folder name is the dish name (labelled training photos such as
+    # AI Hub 한국 이미지(음식)); it is given to the describer so the description names the right dish.
+    photo_food_from_folder: bool = False
     # Training. extra_pairs: other pairs.jsonl files trained together with this run's pairs.
     extra_pairs: list[str] = field(default_factory=list)
     beta: float = 0.1
@@ -326,7 +329,10 @@ def build_pairs(dcfg, rows=None, retriever=None, policy=None, judge=None, teache
     items = []
     for review in tqdm(rows, desc="Stage 2: sample small-model answers"):
         chunks = retriever.retrieve(review.review, review.app_id, config.top_k)
-        description = describer.describe(review.image) if review.image else None
+        description = None
+        if review.image:
+            food = Path(review.image).parent.name if dcfg.photo_food_from_folder else None
+            description = describer.describe(review.image, food) if food else describer.describe(review.image)
         messages = generation_messages(prompt, review, chunks, config.channel, description)
         texts = policy.sample(
             messages,

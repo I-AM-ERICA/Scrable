@@ -28,6 +28,12 @@ DESCRIBE_PROMPT = (
     "음식 이름과 모양을 말하고, 이물질이나 쏟아진 것처럼 눈에 띄는 문제가 보이면 함께 말해 주세요. "
     "사진에 보이지 않는 맛이나 온도는 쓰지 마세요."
 )
+# With a known dish name (labelled training photos). Without the name, Vision-3B misnamed dishes
+# (갈치구이 -> 고등어, 계란찜 -> 짜장면) and invented taste and recipe details.
+HINT_PROMPT = (
+    "사진 속 음식은 {food}입니다. 사진에 보이는 모양, 양, 담긴 그릇만 한두 문장으로 짧게 설명해 주세요. "
+    "이물질이나 쏟아진 것처럼 눈에 띄는 문제가 보이면 함께 말해 주세요. 맛, 온도, 조리법은 쓰지 마세요."
+)
 
 
 def check_image(path):
@@ -76,16 +82,20 @@ class PhotoDescriber:
         self.max_tokens = max_tokens
         self.calls = 0
 
-    def key(self, path):
+    def key(self, path, prompt=None):
         content = hashlib.sha256(check_image(path).read_bytes()).hexdigest()
         identity = json.dumps(getattr(self.vision, "identity", {}), sort_keys=True, default=str)
-        return hashlib.sha256(f"{content}|{self.prompt}|{self.max_tokens}|{identity}".encode()).hexdigest()
+        prompt = prompt or self.prompt
+        return hashlib.sha256(f"{content}|{prompt}|{self.max_tokens}|{identity}".encode()).hexdigest()
 
-    def describe(self, path):
-        cache = self.directory / f"{self.key(path)}.json"
+    def describe(self, path, food=None):
+        """Description of the photo. food: the dish name when it is known (labelled training
+        photos), so the 3B model describes the right dish instead of guessing it."""
+        prompt = HINT_PROMPT.format(food=food) if food else self.prompt
+        cache = self.directory / f"{self.key(path, prompt)}.json"
         if cache.exists():
             return json.loads(cache.read_text(encoding="utf-8"))["text"]
-        text = self.vision.describe_image(path, self.prompt, self.max_tokens).strip()
+        text = self.vision.describe_image(path, prompt, self.max_tokens).strip()
         if not text:
             raise ValueError(f"Empty photo description for {path}")
         self.calls += 1

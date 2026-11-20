@@ -40,5 +40,6 @@
   "min_chosen_specificity": 3,
   "extra_pairs": [
     "outputs/stage2/pairs.jsonl"
-  ]
+  ],
+  "photo_food_from_folder": true
 }

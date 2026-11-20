@@ -140,6 +140,15 @@ def test_menu_matching_uses_dish_names_only():
     assert food_of("[프리미엄]까만／빨간찜닭/1,15cm왕새우튀김2개/2", more) == "찜닭"
 
 
+def test_reviews_about_another_dish_are_skipped():
+    from scrable.public_photo_reviews import names_other_food
+
+    foods = ["계란찜", "해물찜", "순대"]
+    assert names_other_food("해물찜 시켰는데 너무 맵네요", "계란찜", foods)
+    assert not names_other_food("계란찜 부드러워요", "계란찜", foods)
+    assert not names_other_food("순대국 정식의 순대 맛있어요", "순대", foods)
+
+
 def test_photo_reviews_get_dish_photos_and_skip_test_stores(tmp_path):
     from scrable.public_photo_reviews import build, find_food_photos
 
@@ -206,9 +215,9 @@ class FakeDescriber:
     def __init__(self):
         self.paths = []
 
-    def describe(self, path):
-        self.paths.append(path)
-        return "빨간 떡볶이 한 접시가 보입니다."
+    def describe(self, path, food=None):
+        self.paths.append((path, food))
+        return f"빨간 {food or '떡볶이'} 한 접시가 보입니다."
 
 
 def test_photo_pairs_put_description_in_generator_input(tmp_path):
@@ -241,7 +250,7 @@ def test_photo_pairs_put_description_in_generator_input(tmp_path):
     rag = HybridRetriever([Document("d", "메뉴 안내", "store", "doc")], TestEmbeddings(), tmp_path / "rag")
     judge, describer = PhotoPairJudge(), FakeDescriber()
     summary = build_pairs(dcfg, rows, rag, Sampler(), judge, (PhotoTeacher(),), describer)
-    assert summary["pairs"] == 2 and describer.paths == [str(image)]
+    assert summary["pairs"] == 2 and describer.paths == [(str(image), None)]
     pairs = {
         p["review_id"]: p for p in map(json.loads, dcfg.pairs_file.read_text(encoding="utf-8").splitlines())
     }
@@ -250,3 +259,26 @@ def test_photo_pairs_put_description_in_generator_input(tmp_path):
     assert "photo_description" not in json.loads(pairs["t1"]["messages"][1]["content"])
     # 4 candidates (3 samples + teacher) x 2 photo criteria for the one photo review.
     assert sorted(set(judge.with_photo)) == ["accuracy", "relevancy"] and len(judge.with_photo) == 8
+
+
+def test_folder_name_is_given_to_describer(tmp_path):
+    from scrable.photos import HINT_PROMPT, PhotoDescriber
+
+    class Vision:
+        identity = {"backend": "test-only-vision"}
+
+        def __init__(self):
+            self.prompts = []
+
+        def describe_image(self, path, prompt, max_tokens):
+            self.prompts.append(prompt)
+            return "설명"
+
+    photo = tmp_path / "갈치구이" / "a.png"
+    photo.parent.mkdir()
+    photo.write_bytes(FAKE_PNG)
+    vision = Vision()
+    describer = PhotoDescriber(vision, tmp_path / "cache")
+    describer.describe(photo, "갈치구이")
+    describer.describe(photo)  # Different prompt -> separate cache entry.
+    assert vision.prompts[0] == HINT_PROMPT.format(food="갈치구이") and len(vision.prompts) == 2

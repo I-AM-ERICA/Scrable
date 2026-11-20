@@ -133,6 +133,13 @@ def food_of(menu, foods):
     return max(found, key=len) if found else None
 
 
+def names_other_food(text, food, foods):
+    """True when the review talks about another dish (e.g. a 해물찜 review whose order list starts
+    with 계란찜): the photo would not match what the customer wrote about."""
+    text, key = squash(text), squash(food)
+    return any(squash(f) in text and key not in squash(f) for f in foods if f != food)
+
+
 def photo_rows(rows, foods, excluded_stores=(), avoid_texts=()):
     """Usable photo reviews with their matched food: [(row, food)]. Deduplicated by text."""
     seen = {normalize(t) for t in avoid_texts}
@@ -144,7 +151,7 @@ def photo_rows(rows, foods, excluded_stores=(), avoid_texts=()):
         if not keep(text) or normalize(text) in seen:
             continue
         food = food_of(raw.get(COLS["menu"]), foods)
-        if food is None:
+        if food is None or names_other_food(text, food, set(foods) | set(DEFAULT_FOODS)):
             continue
         seen.add(normalize(text))
         out.append((raw, food))
