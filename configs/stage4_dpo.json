@@ -1,0 +1,43 @@
+{
+  "_comment": "Stage 4: public restaurant reviews (Mendeley, CC BY 4.0) + synthetic complaints, with fictional store docs. New pairs need chosen specificity >= 3; stage-2 pairs are trained together.",
+  "base": {
+    "backend": "local",
+    "model": "naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-1.5B",
+    "judge_backend": "anthropic",
+    "judge_model": "claude-haiku-5-5",
+    "judge_workers": 8,
+    "device": "auto",
+    "custom_data": "data/stage4_reviews.jsonl",
+    "documents_dir": "data/public_train_docs",
+    "base_prompt_file": "prompts/stage4_prompt.txt",
+    "embedding_model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+    "knowledge_size": 0,
+    "top_k": 2,
+    "output_dir": "outputs/stage4"
+  },
+  "samples_per_review": 3,
+  "temperature": 0.8,
+  "top_p": 0.95,
+  "teacher_models": [
+    {
+      "backend": "anthropic",
+      "model": "claude-haiku-5-5"
+    }
+  ],
+  "min_margin": 0.15,
+  "min_chosen_score": 0.6,
+  "beta": 0.1,
+  "sft_weight": 0.2,
+  "learning_rate": 5e-05,
+  "epochs": 2,
+  "grad_accum": 8,
+  "max_length": 2048,
+  "eval_fraction": 0.1,
+  "lora_r": 16,
+  "lora_alpha": 32,
+  "lora_dropout": 0.05,
+  "min_chosen_specificity": 3,
+  "extra_pairs": [
+    "outputs/stage2/pairs.jsonl"
+  ]
+}

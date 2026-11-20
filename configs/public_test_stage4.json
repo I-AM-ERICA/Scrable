@@ -1,0 +1,17 @@
+{
+  "_comment": "Real-review test: stage-4 adapter. Run with --split all.",
+  "backend": "local",
+  "model": "naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-1.5B",
+  "device": "auto",
+  "response_adapter": "outputs/stage4/adapter",
+  "judge_backend": "anthropic",
+  "judge_model": "claude-haiku-5-5",
+  "judge_workers": 8,
+  "custom_data": "data/public_test.jsonl",
+  "documents_dir": "data/public_test_docs",
+  "embedding_model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+  "knowledge_size": 0,
+  "top_k": 2,
+  "base_prompt_file": "prompts/stage4_prompt.txt",
+  "output_dir": "outputs/public_test/stage4"
+}

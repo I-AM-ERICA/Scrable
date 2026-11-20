@@ -96,6 +96,18 @@ def validator(count):
     return check
 
 
+def parse_counts(text):
+    """'2:3,1:2' -> {2: 3, 1: 2}."""
+    counts = {}
+    for part in text.split(","):
+        rating, _, count = part.partition(":")
+        rating, count = int(rating), int(count)
+        if rating not in SITUATIONS or count < 1:
+            raise ValueError(f"Bad --counts item {part!r}: rating 1-5, count >= 1")
+        counts[rating] = count
+    return counts
+
+
 def plan(stores, per_store_counts=RATING_COUNTS, seed=42):
     """Deterministic (store, rating, [(situation, style), ...]) request batches."""
     rng = random.Random(seed)
@@ -167,7 +179,12 @@ def main():
     parser.add_argument("--model", default="claude-haiku-5-5")
     parser.add_argument("--cache", default="outputs/synth_reviews_cache")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--counts",
+        help='Reviews per store by rating, e.g. "2:3,1:2" (complaints only). Default: RATING_COUNTS',
+    )
     args = parser.parse_args()
+    counts = parse_counts(args.counts) if args.counts else RATING_COUNTS
 
     documents = load_documents(args.docs, "default")
     stores = sorted({d.app_id for d in documents} - {"default"})
@@ -175,7 +192,7 @@ def main():
         raise ValueError(f"Put each store's documents in its own subfolder of {args.docs}")
     avoid = [r.review for path in args.avoid for r in load_custom_reviews(path)]
     llm = CachedLLM(make_backend(args.backend, args.model, Config()), args.cache)
-    batches = plan(stores, seed=args.seed)
+    batches = plan(stores, counts, seed=args.seed)
     print(f"{len(stores)} stores, {len(batches)} requests to {args.backend}:{args.model}", flush=True)
     rows, dropped = generate(llm, documents, batches, avoid)
     out = Path(args.out)
