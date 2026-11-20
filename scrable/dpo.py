@@ -292,8 +292,13 @@ def reselect_pairs(dcfg, source_dir=None):
     return summary
 
 
-def build_pairs(dcfg, rows=None, retriever=None, policy=None, judge=None, teachers=None):
-    """Write candidates.jsonl, pairs.jsonl and pairs_summary.json. Objects can be injected for tests."""
+def build_pairs(dcfg, rows=None, retriever=None, policy=None, judge=None, teachers=None, describer=None):
+    """Write candidates.jsonl, pairs.jsonl and pairs_summary.json. Objects can be injected for tests.
+
+    Photo reviews (rows with "image", base.image_model set): the photo is described first and the
+    description goes into the generator input exactly as at serving time (generation_messages
+    with photo_description), so the trained model learns to use it. The judge sees the photo.
+    """
     from tqdm.auto import tqdm
 
     config = dcfg.config
@@ -310,11 +315,19 @@ def build_pairs(dcfg, rows=None, retriever=None, policy=None, judge=None, teache
         built = build_llms(config, [response_spec(config), config.role("judge"), *teacher_specs])
         policy, judge, teachers = built[0], built[1], built[2:]
     scorer = ScoredResponseGenerator(policy, judge, retriever, config)
+    if any(r.image for r in rows):
+        if describer is None:
+            from .photos import build_describer
+
+            describer = build_describer(config)
+        if describer is None:
+            raise ValueError("Rows have images: set base.image_model so photos are described")
 
     items = []
     for review in tqdm(rows, desc="Stage 2: sample small-model answers"):
         chunks = retriever.retrieve(review.review, review.app_id, config.top_k)
-        messages = generation_messages(prompt, review, chunks, config.channel)
+        description = describer.describe(review.image) if review.image else None
+        messages = generation_messages(prompt, review, chunks, config.channel, description)
         texts = policy.sample(
             messages,
             config.response_tokens,
@@ -323,7 +336,15 @@ def build_pairs(dcfg, rows=None, retriever=None, policy=None, judge=None, teache
             dcfg.top_p,
             config.seed,
         )
-        items.append({"review": review, "chunks": chunks, "messages": messages, "texts": texts})
+        items.append(
+            {
+                "review": review,
+                "chunks": chunks,
+                "messages": messages,
+                "texts": texts,
+                "photo_description": description,
+            }
+        )
 
     def teacher_answers(item):
         return [t.complete(item["messages"], config.response_tokens) for t in teachers]
@@ -393,6 +414,8 @@ def build_pairs(dcfg, rows=None, retriever=None, policy=None, judge=None, teache
                         "rating": review.rating,
                         "review": review.review,
                         "messages": item["messages"],
+                        "image": review.image,
+                        "photo_description": item["photo_description"],
                         "candidates": item["candidates"],
                     },
                     ensure_ascii=False,

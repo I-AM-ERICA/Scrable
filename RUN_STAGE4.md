@@ -200,6 +200,134 @@ mv outputs/stage4/adapter outputs/stage4/adapter_400
 
 프롬프트도 같이 바꿔야 합니다. 학습한 프롬프트와 서버 프롬프트가 다르면 성능이 떨어집니다.
 
+사진까지 학습했으면(13절) `outputs/stage4/adapter` 대신 `outputs/stage4_photo/adapter`를 씁니다.
+
+---
+
+## 13. 사진 리뷰 학습 (글 리뷰와 한 번에)
+
+앞 사진 실험에서는 답글 모델이 사진 설명을 무시했습니다. 사진 설명이 들어간 입력으로 학습한 적이 없었기 때문입니다. 13절에서는 **사진 설명을 넣은 쌍**을 만들고, 글 리뷰 쌍과 합쳐 어댑터 하나로 학습합니다.
+
+- **글**: Mendeley에서 사진을 첨부한 리뷰(`HasPicture=1`). 사진 파일 자체는 배포되지 않습니다
+- **사진**: 음식 이름이 붙은 공개 음식 사진(예: AI Hub "한국 이미지(음식)"). 주문 메뉴(`Menu` 열)가 같은 리뷰에 붙입니다. 같은 요리의 사진이지 그 손님의 사진은 아닙니다
+- **한계**: 깔끔한 음식 사진이라 이물질·쏟아짐 같은 **불만 사진은 없습니다**. "사진 속 음식을 짚어 답하기"를 배우는 학습입니다
+- 채점하는 Haiku는 사진을 직접 봅니다(관련성·정확성 채점에만, 사진 한 장이 입력 토큰 약 1,000개)
+
+| 단계 | 비용 | 시간 |
+|---|---|---|
+| 사진 받기, 서버로 보내기 | 0원 | 30분 안팎 |
+| 사진 리뷰 200건 고르기 + 새 가게 문서 | 약 $0.1 | 5분 |
+| 파일럿 10건 | 몇 센트 | 10분 (Vision-3B 불러오기 포함) |
+| 쌍 만들기 200건 | 약 $1~1.5 (파일럿 금액 × 20) | 약 1~1.5시간 |
+| 학습 (사진 + 글 + 2단계 쌍) | 0원 | 15~25분 |
+| 평가 | 약 $0.3 | 30분 |
+
+글 리뷰를 1000건으로 늘린다면(11절), **11절의 쌍 만들기를 먼저 끝내고** 13-5로 넘어가세요. 둘 다 GPU와 Haiku 한도를 같이 쓰기 때문에 동시에 돌리면 둘 다 느려집니다. 학습(13-7)은 마지막에 한 번만 합니다.
+
+### 13-1. [PC] 음식 사진 받기
+
+[AI Hub](https://aihub.or.kr)에서 "한국 이미지(음식)"를 찾아 **이용 조건(상업적 이용, 출처 표시)을 먼저 확인**한 뒤 신청하고 받습니다. 전부 받을 필요는 없고, 사진 리뷰가 많은 아래 음식만 종류마다 10~20장이면 됩니다. Mendeley에서 사진을 첨부한 리뷰 수가 많은 순서입니다.
+
+> 찜닭, 족발, 보쌈, 떡볶이, 순대국, 갈비찜, 탕수육, 김치찌개, 불고기, 부대찌개, 감자탕, 볶음밥, 닭볶음탕, 짬뽕, 짜장면
+
+폴더는 **음식 하나에 폴더 하나**로 둡니다. **폴더 이름이 곧 음식 이름**이라, AI Hub 이름이 다르면(예: `순댓국`) 위 이름으로 바꿔 주세요.
+
+```
+food_photos\
+    찜닭\     ← 사진 10~20장 (.jpg, .png)
+    족발\
+    ...
+```
+
+### 13-2. [WSL] 서버로 보내기
+
+`food_photos` 폴더를 Windows `다운로드`에 두었다면:
+
+```bash
+tar -czf ~/food_photos.tgz -C /mnt/c/Users/wounc/Downloads food_photos && scp ~/food_photos.tgz root@<서버IP>:/opt/scrable/
+```
+
+서버에서:
+
+```bash
+cd /opt/scrable/scrable_stage1 && tar -xzf /opt/scrable/food_photos.tgz -C data/raw && ls data/raw/food_photos
+```
+
+### 13-3. [서버] 사진 리뷰 200건 고르기 (0원)
+
+```bash
+.venv/bin/python -m scrable.public_photo_reviews build "data/raw/Reviews Written in Korean.csv" --photos data/raw/food_photos
+```
+
+`by_food`에 음식별 건수가 나옵니다. `foods_without_reviews`에 음식이 있으면 폴더 이름이 메뉴 이름과 안 맞는 겁니다. 학습·테스트 리뷰와 겹치는 글과 테스트 식당은 자동으로 뺍니다.
+
+### 13-4. [서버] 새 식당의 가게 문서 (약 $0.1)
+
+```bash
+.venv/bin/python -m scrable.synth_store_docs --reviews data/public_photo_reviews.jsonl --out data/public_train_docs
+```
+
+이미 문서가 있는 식당(pub-NNN)은 그대로 두고, 새 식당(pubimg-NNN)만 만듭니다(`kept N existing`).
+
+### 13-5. [서버] 파일럿 10건
+
+Console 사용 금액을 적어 두고:
+
+```bash
+head -n 10 data/public_photo_reviews.jsonl > data/public_photo_pilot.jsonl && .venv/bin/python -m scrable.dpo pairs --config configs/stage4_photo_pilot.json 2>&1 | tail -n 25
+```
+
+사진 설명이 잘 나오는지 하나 봅니다.
+
+```bash
+head -n 1 outputs/stage4_photo/candidates.jsonl | .venv/bin/python -c "import json,sys; r=json.loads(sys.stdin.read()); print(r['review']); print(r['photo_description'])"
+```
+
+**늘어난 금액 × 20**이 본 실행 비용입니다.
+
+### 13-6. [서버] 쌍 만들기 (약 1~1.5시간)
+
+```bash
+nohup .venv/bin/python -m scrable.dpo pairs --config configs/stage4_photo_dpo.json > stage4_photo_pairs.log 2>&1 &
+```
+
+끝나면:
+
+```bash
+grep -A12 '"reviews"' stage4_photo_pairs.log | head -n 20
+```
+
+### 13-7. [서버] 한 번에 학습 (15~25분)
+
+사진 쌍 + 4단계 글 쌍(`outputs/stage4/pairs.jsonl`, 1000건으로 늘렸으면 그 결과) + 2단계 쌍을 같이 학습합니다.
+
+```bash
+nohup .venv/bin/python -m scrable.dpo train --config configs/stage4_photo_dpo.json > stage4_photo_train.log 2>&1 &
+```
+
+`Training pairs by file:`에 파일 세 개가 다 나와야 합니다.
+
+### 13-8. [서버] 평가 (약 30분)
+
+사진 테스트(우리 사진 16장, 리뷰 32건)는 비교 기준도 지금 채점 방식으로 다시 채점합니다. 글 테스트 두 개는 사진 학습 때문에 나빠지지 않았는지 확인합니다.
+
+```bash
+nohup sh -c '
+.venv/bin/python -m scrable.evaluate --config configs/photo_eval_stage2.json --split all --label photo-stage2 &&
+.venv/bin/python -m scrable.evaluate --config configs/photo_eval_stage4.json --split all --label photo-stage4 --reference outputs/photo_eval_stage2/all_predictions.json &&
+.venv/bin/python -m scrable.evaluate --config configs/stage4_eval.json --adapter outputs/stage4_photo/adapter --output-dir outputs/stage4_photo_eval --label stage4-photo --reference outputs/stage2_eval/test_predictions.json outputs/stage4_eval/test_predictions.json &&
+.venv/bin/python -m scrable.evaluate --config configs/public_test_stage4.json --split all --adapter outputs/stage4_photo/adapter --output-dir outputs/public_test/stage4_photo --label stage4-photo --reference outputs/public_test/stage2/all_predictions.json outputs/public_test/stage4/all_predictions.json outputs/public_test/haiku/all_predictions.json
+' > stage4_photo_eval.log 2>&1 &
+```
+
+`grep -c "Saved results" stage4_photo_eval.log`가 `4`가 되면:
+
+```bash
+grep -A6 -E "^(photo-stage4|stage4-photo) - " stage4_photo_eval.log
+```
+
+**참고**: 지금 gRPC 서버(`DraftReply`)는 백엔드 규약에 사진 칸이 없어서 사진을 받지 못합니다. 사진 답글을 서비스에서 쓰려면 백엔드 담당자와 규약에 사진 필드를 추가해야 합니다.
+
 ---
 
 ## 데이터 출처 표기 (CC BY 4.0)

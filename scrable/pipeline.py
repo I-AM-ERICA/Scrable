@@ -78,7 +78,9 @@ class ScoredResponseGenerator:
         if criterion == "accuracy":
             payload["expert_response"] = review.expert_response
         content = json.dumps(payload, ensure_ascii=False)
-        if review.image:
+        # Only the criteria with a photo note (relevancy, accuracy) look at the photo: specificity and
+        # grammar do not depend on it, and each attached photo costs about 1,000 input tokens.
+        if review.image and criterion in PHOTO_RUBRIC_NOTES:
             # The judge sees the customer's photo itself (Claude image input), not the description.
             if self.config.role("judge")[0] != "anthropic":
                 raise ValueError("Photo reviews need judge_backend=anthropic (the judge must see the photo)")

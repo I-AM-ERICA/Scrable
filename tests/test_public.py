@@ -10,6 +10,7 @@ from scrable.public_reviews import build, keep, read_csv
 from scrable.synth_reviews import parse_counts, plan
 from scrable.synth_store_docs import generate
 from scrable.synth_store_docs import plan as doc_plan
+from scrable.types import Review
 
 
 def fake_rows(stores=6, per_store=12):
@@ -112,3 +113,134 @@ def test_complaint_only_counts():
     batches = plan(["pub-001", "pub-002"], parse_counts("2:3,1:2"))
     assert sum(len(specs) for _, _, specs in batches) == 10
     assert {rating for _, rating, _ in batches} == {1, 2}
+
+
+# ---------------------------------------------------------------- photo reviews
+
+FAKE_PNG = b"\x89PNG\r\n\x1a\nfake-image-bytes"
+
+
+def csv_row(store, menu, text, photo="1", star="5"):
+    return {"RestaurantID": store, "Menu": menu, "Review": text, "Total": star, "HasPicture": photo}
+
+
+def test_menu_matching_uses_dish_names_only():
+    from scrable.public_photo_reviews import food_of
+
+    foods = ["김치찌개", "라면", "냉면", "물냉면", "부대찌개"]
+    assert food_of("[2~3인분] 짜글이 정식/1(짜글이 선택（생돼지 김치찌개 짜글이）)", foods) is None
+    assert food_of("부대찌개/1(라면사리 추가)", foods) == "부대찌개"
+    assert food_of("짜글이/1,라면사리/1", foods) is None
+    assert food_of("물냉면/2", foods) == "물냉면"
+
+
+def test_photo_reviews_get_dish_photos_and_skip_test_stores(tmp_path):
+    from scrable.public_photo_reviews import build, find_food_photos
+
+    for food in ("떡볶이", "족발"):
+        (tmp_path / "photos" / "분류" / food).mkdir(parents=True)
+        for i in range(2):
+            (tmp_path / "photos" / "분류" / food / f"{i}.jpg").write_bytes(FAKE_PNG + bytes([i]))
+    rows = [csv_row("s1", "떡볶이/1", f"떡볶이 너무 맛있어요 사진 첨부합니다 {i}") for i in range(4)]
+    rows += [csv_row("s2", "족발/1(소)", f"족발 부드럽고 양도 많아요 {i}", star="3") for i in range(4)]
+    rows += [csv_row("s3", "족발/1", "테스트 식당 족발 리뷰입니다 맛있어요")]
+    rows += [csv_row("s1", "떡볶이/1", "사진 없는 떡볶이 리뷰입니다 맛있어요", photo="0")]
+    store_map = {"s1": "pub-001", "s3": "pubtest-001"}
+    out, new_ids, stats = build(rows, find_food_photos(tmp_path / "photos"), store_map, count=6, per_food=3)
+    assert len(out) == 6 and stats["by_food"] == {"떡볶이": 3, "족발": 3}
+    assert {r["app_id"] for r in out} == {"pub-001", "pubimg-001"} and new_ids == {"s2": "pubimg-001"}
+    assert all("/떡볶이/" in r["image"] for r in out if r["app_id"] == "pub-001")
+    assert all(Review(**r).image for r in out) and len({r["id"] for r in out}) == 6
+    assert "테스트 식당" not in json.dumps(out, ensure_ascii=False)
+
+
+def test_existing_store_documents_are_kept(tmp_path):
+    jobs = [("pub-001", ["리뷰"], "policy", "event"), ("pubimg-001", ["리뷰"], "policy", "event")]
+    (tmp_path / "pub-001").mkdir()
+    (tmp_path / "pub-001" / "info.md").write_text("기존 문서", encoding="utf-8")
+    written = generate(DocLLM(), jobs, tmp_path)
+    assert written == [tmp_path / "pubimg-001" / "info.md"]
+    assert (tmp_path / "pub-001" / "info.md").read_text(encoding="utf-8") == "기존 문서"
+
+
+class PhotoPairJudge:
+    """Test-only judge: sees the photo only for relevancy/accuracy; teacher answers score higher."""
+
+    identity = {"backend": "test-only-photo-pair-judge"}
+
+    def __init__(self):
+        self.with_photo = []
+
+    def complete(self, messages, max_tokens):
+        content = messages[-1]["content"]
+        if isinstance(content, list):
+            payload = json.loads(content[1]["text"].split("\n", 1)[1])
+            self.with_photo.append(payload["criterion"])
+        else:
+            payload = json.loads(content)
+        score = 5 if "teacher" in payload["prediction"] else 2
+        return json.dumps({"score": score, "reason": "fixture", "suggestions": []})
+
+
+class PhotoTeacher:
+    identity = {"backend": "test-only-teacher"}
+
+    def complete(self, messages, max_tokens):
+        return "teacher answer about the dish"
+
+
+class Sampler:
+    identity = {"backend": "test-only-sampler"}
+
+    def sample(self, messages, max_tokens, n, temperature, top_p, seed):
+        return [f"small answer {i}" for i in range(n)]
+
+
+class FakeDescriber:
+    def __init__(self):
+        self.paths = []
+
+    def describe(self, path):
+        self.paths.append(path)
+        return "빨간 떡볶이 한 접시가 보입니다."
+
+
+def test_photo_pairs_put_description_in_generator_input(tmp_path):
+    from scrable.dpo import DPOConfig, build_pairs
+    from scrable.rag import HybridRetriever
+    from scrable.types import Document
+    from tests.helpers import TestEmbeddings
+
+    image = tmp_path / "a.png"
+    image.write_bytes(FAKE_PNG)
+    prompt = tmp_path / "prompt.txt"
+    prompt.write_text("프롬프트", encoding="utf-8")
+    dcfg = DPOConfig(
+        base={
+            "judge_backend": "anthropic",
+            "judge_model": "judge",
+            "custom_data": "unused.jsonl",
+            "documents_dir": "docs",
+            "knowledge_size": 0,
+            "base_prompt_file": str(prompt),
+            "output_dir": str(tmp_path / "out"),
+            "image_model": "naver-hyperclovax/HyperCLOVAX-SEED-Vision-Instruct-3B",
+        },
+        teacher_models=[{"backend": "anthropic", "model": "big"}],
+    )
+    rows = [
+        Review("p1", "떡볶이 맛있어요", "store", rating=5, image=str(image)),
+        Review("t1", "배달이 빨랐어요", "store", rating=5),
+    ]
+    rag = HybridRetriever([Document("d", "메뉴 안내", "store", "doc")], TestEmbeddings(), tmp_path / "rag")
+    judge, describer = PhotoPairJudge(), FakeDescriber()
+    summary = build_pairs(dcfg, rows, rag, Sampler(), judge, (PhotoTeacher(),), describer)
+    assert summary["pairs"] == 2 and describer.paths == [str(image)]
+    pairs = {
+        p["review_id"]: p for p in map(json.loads, dcfg.pairs_file.read_text(encoding="utf-8").splitlines())
+    }
+    photo_input = json.loads(pairs["p1"]["messages"][1]["content"])
+    assert photo_input["photo_description"].startswith("빨간 떡볶이")
+    assert "photo_description" not in json.loads(pairs["t1"]["messages"][1]["content"])
+    # 4 candidates (3 samples + teacher) x 2 photo criteria for the one photo review.
+    assert sorted(set(judge.with_photo)) == ["accuracy", "relevancy"] and len(judge.with_photo) == 8

@@ -132,7 +132,12 @@ def test_photo_review_evaluation_describes_photo_and_shows_it_to_judge(tmp_path)
     generator_input = json.loads(judge.contents[0])
     assert generator_input["photo_description"].startswith("떡볶이")
     judged = [c for c in judge.contents if isinstance(c, list)]
-    assert len(judged) == 4 and all(c[0]["type"] == "image" for c in judged)
+    # Only relevancy and accuracy see the photo; specificity and grammar are judged on text.
+    assert len(judged) == 2 and all(c[0]["type"] == "image" for c in judged)
+    assert {json.loads(c[1]["text"].split("\n", 1)[1])["criterion"] for c in judged} == {
+        "relevancy",
+        "accuracy",
+    }
     saved = json.loads((tmp_path / "out" / "all_predictions.json").read_text(encoding="utf-8"))
     assert saved["predictions"][0]["photo_description"].startswith("떡볶이")
 

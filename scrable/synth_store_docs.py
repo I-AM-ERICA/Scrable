@@ -65,10 +65,15 @@ def plan(rows, seed=42):
     return jobs
 
 
-def generate(llm, jobs, out_dir, max_tokens=4096, attempts=3):
+def generate(llm, jobs, out_dir, max_tokens=4096, attempts=3, overwrite=False):
+    """Write <out_dir>/<app_id>/info.md per job. Existing documents are kept unless overwrite:
+    pairs already built from a store were made with its current document."""
     out_dir = Path(out_dir)
     written = []
     for app_id, reviews, policy, event in jobs:
+        path = out_dir / app_id / "info.md"
+        if path.exists() and not overwrite:
+            continue
         payload = {"reviews": reviews, "policy": policy, "event": event}
         doc = structured_call(
             llm,
@@ -80,7 +85,6 @@ def generate(llm, jobs, out_dir, max_tokens=4096, attempts=3):
             max_tokens,
             attempts,
         )
-        path = out_dir / app_id / "info.md"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(doc + "\n", encoding="utf-8", newline="\n")
         written.append(path)
@@ -95,13 +99,15 @@ def main():
     parser.add_argument("--model", default="claude-haiku-5-5")
     parser.add_argument("--cache", default="outputs/synth_store_docs_cache")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--overwrite", action="store_true", help="Rewrite stores that already have info.md")
     args = parser.parse_args()
     rows = [r for path in args.reviews for r in load_custom_reviews(path)]
     jobs = plan(rows, args.seed)
     llm = CachedLLM(make_backend(args.backend, args.model, Config()), args.cache)
     print(f"{len(jobs)} stores, requests to {args.backend}:{args.model}", flush=True)
-    written = generate(llm, jobs, args.out)
-    print(f"Wrote {len(written)} store documents to {args.out} (API calls {llm.calls})")
+    written = generate(llm, jobs, args.out, overwrite=args.overwrite)
+    kept = len(jobs) - len(written)
+    print(f"Wrote {len(written)} store documents to {args.out}, kept {kept} existing (API calls {llm.calls})")
 
 
 if __name__ == "__main__":
