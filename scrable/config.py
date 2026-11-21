@@ -62,11 +62,12 @@ class Config:
     # generator input key change; criteria and weights stay the same).
     channel: str = "review"
     # Photo reviews (plan A): local vision model that describes each review's photo for the
-    # generator, e.g. "naver-hyperclovax/HyperCLOVAX-SEED-Vision-Instruct-3B". None = photos unused
-    # by the generator (the API judge still sees them).
+    # generator: "naver-hyperclovax/HyperCLOVAX-SEED-Vision-Instruct-3B" or any Hugging Face
+    # image-text-to-text model such as "Qwen/Qwen2.5-VL-7B-Instruct" (Apache-2.0). None = photos
+    # unused by the generator (the API judge still sees them).
     image_model: str | None = None
-    # Give the vision model the store's menu (from documents_dir) and the review text as hints, so
-    # naming the dish is a pick from the menu. Without hints Vision-3B often misnamed dishes.
+    # Give the vision model the store's menu (from documents_dir) as a reference, so it names the
+    # dish right. Without it Vision-3B often misnamed dishes (see photos.context_prompt).
     photo_context: bool = False
 
     def __post_init__(self):
@@ -77,9 +78,9 @@ class Config:
         if self.channel not in {"review", "email"}:
             raise ValueError("channel must be review or email")
         if self.image_model is not None and (
-            "hyperclovax" not in self.image_model.lower() or "vision" not in self.image_model.lower()
+            not isinstance(self.image_model, str) or "/" not in self.image_model.strip()
         ):
-            raise ValueError("image_model must be a HyperCLOVAX-SEED-Vision model or null")
+            raise ValueError("image_model must be a Hugging Face model id (org/name) or null")
         if self.rag_backend not in {"local", "azure"}:
             raise ValueError("rag_backend must be local or azure")
         for name in (

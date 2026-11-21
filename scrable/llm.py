@@ -273,6 +273,57 @@ class VisionLLM:
         return self._texts(self._generate(inputs, max_new_tokens=max_tokens, do_sample=False), inputs)[0]
 
 
+class ImageTextLLM:
+    """A pretrained Hugging Face image-text-to-text model used only to describe photos, e.g.
+    Qwen/Qwen2.5-VL-7B-Instruct (Apache-2.0). Same describe_image() as VisionLLM.
+
+    Loaded with AutoModelForImageTextToText and the model's own processor; no remote code.
+    max_pixels caps the image size for processors that accept it (Qwen2-VL family).
+    """
+
+    def __init__(self, model, device="auto", seed=42, max_pixels=1024 * 28 * 28):
+        import torch
+        from transformers import AutoModelForImageTextToText, AutoProcessor, set_seed
+
+        set_seed(seed)
+        self.model_name = model
+        if device == "auto":
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = device
+        dtype = (
+            torch.bfloat16 if device.startswith("cuda") and torch.cuda.is_bf16_supported() else torch.float32
+        )
+        print(f"Loading {model} (image-text-to-text) on {device}...", flush=True)
+        try:
+            self.processor = AutoProcessor.from_pretrained(model, max_pixels=max_pixels)
+        except (TypeError, ValueError):
+            self.processor = AutoProcessor.from_pretrained(model)
+        self.model = AutoModelForImageTextToText.from_pretrained(model, torch_dtype=dtype).to(device).eval()
+        self.identity = {
+            "backend": "transformers-image-text",
+            "model": model,
+            "resolved_revision": getattr(self.model.config, "_commit_hash", None),
+            "device": device,
+            "max_pixels": max_pixels,
+            "seed": seed,
+            "decode": "greedy-v1",
+        }
+
+    def describe_image(self, image_path, question, max_tokens=256):
+        import torch
+        from PIL import Image
+
+        with Image.open(image_path) as source:
+            image = source.convert("RGB")
+        chat = [{"role": "user", "content": [{"type": "image"}, {"type": "text", "text": question}]}]
+        text = self.processor.apply_chat_template(chat, tokenize=False, add_generation_prompt=True)
+        inputs = self.processor(text=[text], images=[image], return_tensors="pt").to(self.device)
+        with torch.inference_mode():
+            output = self.model.generate(**inputs, max_new_tokens=max_tokens, do_sample=False)
+        new = output[0, inputs["input_ids"].shape[-1] :]
+        return self.processor.decode(new, skip_special_tokens=True).strip()
+
+
 class OpenAILLM:
     def __init__(self, model, min_output_tokens=1):
         from openai import OpenAI

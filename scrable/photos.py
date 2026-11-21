@@ -40,16 +40,24 @@ MAX_HINT_CHARS = 300
 
 
 def context_prompt(review=None, menu=None):
-    """Description question with the store's menu and the review as hints (either may be None)."""
-    lines = ["이 사진은 손님이 리뷰와 함께 올린 사진입니다."]
+    """Description question with the store's menu (and optionally the review) as hints.
+
+    History: v1 gave the menu and the review and asked which menu item it is. On the 32 photo
+    reviews it named 국밥 right (4/4, was 0/4) but scored -0.052 overall: the model forced a menu
+    item onto drinks that were not it (라떼 -> 아메리카노, the first menu line) and copied review
+    complaints into the description. v2 (this): the menu is a reference only, no forced pick,
+    problems only when visible; evaluation passes the menu without the review.
+    """
+    lines = []
     if menu:
-        lines.append(f"가게 메뉴: {menu[:MAX_HINT_CHARS]}")
+        lines.append(f"참고: 이 가게 메뉴는 {menu[:MAX_HINT_CHARS]} 입니다.")
     if review:
-        lines.append(f"손님 리뷰: {review[:MAX_HINT_CHARS]}")
+        lines.append(f'참고: 손님 리뷰는 "{review[:MAX_HINT_CHARS]}" 입니다.')
     lines.append(
-        "사진 속 음식이 메뉴 중 무엇인지 먼저 쓰고, 사진에 보이는 모양과 양, 이물질이나 쏟아진 것 같은 "
-        "문제가 있으면 한두 문장으로 설명해 주세요. 리뷰는 참고만 하고 사진에 실제로 보이는 것만 쓰세요. "
-        "맛, 온도, 조리법은 쓰지 마세요."
+        "이 사진 속 음식이나 음료의 이름과 모양을 한국어 한두 문장으로 설명해 주세요. "
+        "메뉴에 있는 이름으로 보이면 그 이름을 쓰고, 메뉴와 다르게 보이면 사진에 보이는 대로 쓰세요. "
+        "이물질이나 쏟아진 것처럼 눈에 띄는 문제가 보일 때만 말하고, 없으면 언급하지 마세요. "
+        "맛, 온도, 조리법, 사진에 보이지 않는 내용은 쓰지 마세요."
     )
     return "\n".join(lines)
 
@@ -166,7 +174,10 @@ def build_describer(config):
     """PhotoDescriber for Config.image_model, or None when photos are not described."""
     if not config.image_model:
         return None
-    from .llm import make_backend
+    from .llm import ImageTextLLM, is_vision, make_backend
 
-    vision = make_backend("local", config.image_model, config)
+    if is_vision(config.image_model):  # HyperCLOVAX-SEED-Vision: NAVER's remote-code loader
+        vision = make_backend("local", config.image_model, config)
+    else:  # Any other pretrained image-text-to-text model, e.g. Qwen/Qwen2.5-VL-7B-Instruct
+        vision = ImageTextLLM(config.image_model, config.device, config.seed)
     return PhotoDescriber(vision, Path(config.output_dir) / "photo_cache")

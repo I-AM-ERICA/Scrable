@@ -51,9 +51,9 @@ class ScoredResponseGenerator:
         description = None
         if review.image and self.describer is not None:
             if getattr(self.config, "photo_context", False):
-                description = self.describer.describe(
-                    review.image, review=review.review, menu=self.menus.get(review.app_id)
-                )
+                # Menu only: with the review text the vision model copied the complaint into the
+                # description (see photos.context_prompt).
+                description = self.describer.describe(review.image, menu=self.menus.get(review.app_id))
             else:
                 description = self.describer.describe(review.image)
             self.photo_descriptions[review.id] = description

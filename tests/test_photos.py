@@ -67,7 +67,8 @@ def test_review_photo_field_is_optional_and_validated(tmp_path):
     with pytest.raises(ValueError, match="image"):
         Review("r", "맛있어요", "s", image=" ")
     with pytest.raises(ValueError, match="image_model"):
-        Config(knowledge_size=0, documents_dir="d", image_model="some/other-model")
+        Config(knowledge_size=0, documents_dir="d", image_model="not-a-model-id")
+    assert Config(knowledge_size=0, documents_dir="d", image_model="Qwen/Qwen2.5-VL-7B-Instruct").image_model
 
 
 def test_photo_description_changes_generator_input_only_when_present():
@@ -233,8 +234,8 @@ def test_context_hint_uses_store_menu_and_review(tmp_path):
         "s1": "떡볶이, 김밥, 순대 / 단무지 기본 제공"
     }
     prompt = context_prompt("떡볶이 맛있어요", "떡볶이, 김밥")
-    assert "가게 메뉴: 떡볶이, 김밥" in prompt and "손님 리뷰: 떡볶이 맛있어요" in prompt
-    assert "가게 메뉴" not in context_prompt("리뷰만", None)
+    assert "메뉴는 떡볶이, 김밥" in prompt and "떡볶이 맛있어요" in prompt
+    assert "메뉴는" not in context_prompt("리뷰만", None)
 
     class Vision:
         identity = {"backend": "test-only-vision"}
@@ -251,7 +252,7 @@ def test_context_hint_uses_store_menu_and_review(tmp_path):
     describer = PhotoDescriber(vision, tmp_path / "cache")
     describer.describe(image, review="맛있어요", menu="떡볶이")
     describer.describe(image)
-    assert "가게 메뉴: 떡볶이" in vision.prompts[0] and vision.prompts[1] != vision.prompts[0]
+    assert "메뉴는 떡볶이" in vision.prompts[0] and vision.prompts[1] != vision.prompts[0]
 
 
 def test_photo_context_config_passes_menu_and_review_to_describer(tmp_path):
@@ -274,9 +275,31 @@ def test_photo_context_config_passes_menu_and_review_to_describer(tmp_path):
             return []
 
     review = Review("r", "떡볶이 맛있어요", "s1", image="x.png")
-    for flag, expected in ((True, {"review": "떡볶이 맛있어요", "menu": "떡볶이, 김밥"}), (False, {})):
+    for flag, expected in ((True, {"menu": "떡볶이, 김밥"}), (False, {})):
         recorder = Recorder()
         config = Config(knowledge_size=0, documents_dir="d", photo_context=flag)
         scorer = ScoredResponseGenerator(Gen(), None, Retriever(), config, recorder, {"s1": "떡볶이, 김밥"})
         scorer.generate("p", review)
         assert recorder.calls == [expected]
+
+
+def test_other_vision_models_use_the_generic_loader(monkeypatch, tmp_path):
+    import scrable.llm as llm_module
+    from scrable.photos import build_describer
+
+    built = []
+
+    class FakeImageText:
+        def __init__(self, model, device, seed):
+            built.append(model)
+            self.identity = {"backend": "test-only", "model": model}
+
+    monkeypatch.setattr(llm_module, "ImageTextLLM", FakeImageText)
+    config = Config(
+        knowledge_size=0,
+        documents_dir="d",
+        image_model="Qwen/Qwen2.5-VL-7B-Instruct",
+        output_dir=str(tmp_path),
+    )
+    describer = build_describer(config)
+    assert built == ["Qwen/Qwen2.5-VL-7B-Instruct"] and isinstance(describer.vision, FakeImageText)
