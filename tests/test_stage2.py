@@ -387,6 +387,7 @@ def test_train_dpo_with_dora_saves_a_dora_adapter(tmp_path):
         lora_dropout=0.0,
         eval_fraction=0.0,
         use_dora=True,
+        gradient_checkpointing=True,  # as in configs/stage4_photo_dora.json
     )
     messages = [{"role": "system", "content": "s"}, {"role": "user", "content": "review"}]
     pairs = [{"messages": messages, "chosen": "thanks", "rejected": "you??"} for _ in range(4)]

@@ -1,5 +1,5 @@
 {
-  "_comment": "Photo adapter with a bigger, DoRA adapter: same pairs as stage4_photo (copy outputs/stage4_photo/pairs.jsonl into this output_dir first), LoRA r=64 / alpha=128 with DoRA. Train step only; compare with outputs/stage4_photo/adapter.",
+  "_comment": "Photo adapter with a bigger, DoRA adapter: same pairs as stage4_photo (copy outputs/stage4_photo/pairs.jsonl into this output_dir first), LoRA r=64 / alpha=128 with DoRA. Gradient checkpointing is on because DoRA r=64 ran out of memory on the 22 GB L4 without it (slower, same result). Train step only; compare with outputs/stage4_photo/adapter.",
   "base": {
     "backend": "local",
     "model": "naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-1.5B",
@@ -42,5 +42,6 @@
     "outputs/stage2/pairs.jsonl"
   ],
   "photo_food_from_folder": true,
-  "use_dora": true
+  "use_dora": true,
+  "gradient_checkpointing": true
 }
