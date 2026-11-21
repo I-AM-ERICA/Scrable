@@ -222,3 +222,61 @@ def test_media_type_comes_from_file_content_not_extension(tmp_path):
     assert media_type_of(FAKE_PNG, misnamed) == "image/png"
     assert media_type_of(b"\xff\xd8\xff\xe0rest", tmp_path / "x.png") == "image/jpeg"
     assert media_type_of(b"unknown", tmp_path / "x.webp") == "image/webp"
+
+
+def test_context_hint_uses_store_menu_and_review(tmp_path):
+    from scrable.photos import context_prompt, menu_text, store_menus
+
+    doc = "# 가게\n## 기본 정보\n- 업종: 분식\n## 메뉴\n- 떡볶이, 김밥, 순대\n- 단무지 기본 제공\n## 배달\n- 배달앱"
+    assert menu_text(doc) == "떡볶이, 김밥, 순대 / 단무지 기본 제공"
+    assert store_menus([Document("d", doc, "s1", "x"), Document("e", "# 공지", "s2", "y")]) == {
+        "s1": "떡볶이, 김밥, 순대 / 단무지 기본 제공"
+    }
+    prompt = context_prompt("떡볶이 맛있어요", "떡볶이, 김밥")
+    assert "가게 메뉴: 떡볶이, 김밥" in prompt and "손님 리뷰: 떡볶이 맛있어요" in prompt
+    assert "가게 메뉴" not in context_prompt("리뷰만", None)
+
+    class Vision:
+        identity = {"backend": "test-only-vision"}
+
+        def __init__(self):
+            self.prompts = []
+
+        def describe_image(self, path, prompt, max_tokens):
+            self.prompts.append(prompt)
+            return "떡볶이 한 접시"
+
+    image = photo(tmp_path)
+    vision = Vision()
+    describer = PhotoDescriber(vision, tmp_path / "cache")
+    describer.describe(image, review="맛있어요", menu="떡볶이")
+    describer.describe(image)
+    assert "가게 메뉴: 떡볶이" in vision.prompts[0] and vision.prompts[1] != vision.prompts[0]
+
+
+def test_photo_context_config_passes_menu_and_review_to_describer(tmp_path):
+    from scrable.pipeline import ScoredResponseGenerator
+
+    class Recorder:
+        def __init__(self):
+            self.calls = []
+
+        def describe(self, path, **hints):
+            self.calls.append(hints)
+            return "떡볶이"
+
+    class Gen:
+        def complete(self, messages, max_tokens):
+            return "답글"
+
+    class Retriever:
+        def retrieve(self, text, app_id, top_k):
+            return []
+
+    review = Review("r", "떡볶이 맛있어요", "s1", image="x.png")
+    for flag, expected in ((True, {"review": "떡볶이 맛있어요", "menu": "떡볶이, 김밥"}), (False, {})):
+        recorder = Recorder()
+        config = Config(knowledge_size=0, documents_dir="d", photo_context=flag)
+        scorer = ScoredResponseGenerator(Gen(), None, Retriever(), config, recorder, {"s1": "떡볶이, 김밥"})
+        scorer.generate("p", review)
+        assert recorder.calls == [expected]

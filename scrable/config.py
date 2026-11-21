@@ -65,6 +65,9 @@ class Config:
     # generator, e.g. "naver-hyperclovax/HyperCLOVAX-SEED-Vision-Instruct-3B". None = photos unused
     # by the generator (the API judge still sees them).
     image_model: str | None = None
+    # Give the vision model the store's menu (from documents_dir) and the review text as hints, so
+    # naming the dish is a pick from the menu. Without hints Vision-3B often misnamed dishes.
+    photo_context: bool = False
 
     def __post_init__(self):
         for name in ("backend", "judge_backend", "prompt_backend"):

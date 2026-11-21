@@ -37,19 +37,25 @@ def generation_messages(prompt, review, chunks, channel="review", photo_descript
 
 
 class ScoredResponseGenerator:
-    def __init__(self, response_llm, judge_llm, retriever, config, describer=None):
+    def __init__(self, response_llm, judge_llm, retriever, config, describer=None, menus=None):
         self.response_llm = response_llm
         self.judge_llm = judge_llm
         self.retriever = retriever
         self.config = config
         self.describer = describer  # PhotoDescriber (scrable/photos.py) or None
+        self.menus = menus or {}  # app_id -> menu line, used when config.photo_context
         self.photo_descriptions = {}
 
     def generate(self, prompt, review):
         chunks = self.retriever.retrieve(review.review, review.app_id, self.config.top_k)
         description = None
         if review.image and self.describer is not None:
-            description = self.describer.describe(review.image)
+            if getattr(self.config, "photo_context", False):
+                description = self.describer.describe(
+                    review.image, review=review.review, menu=self.menus.get(review.app_id)
+                )
+            else:
+                description = self.describer.describe(review.image)
             self.photo_descriptions[review.id] = description
         prediction = self.response_llm.complete(
             generation_messages(prompt, review, chunks, self.config.channel, description),

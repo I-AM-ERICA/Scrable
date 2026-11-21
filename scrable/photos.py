@@ -34,6 +34,47 @@ HINT_PROMPT = (
     "사진 속 음식은 {food}입니다. 사진에 보이는 모양, 양, 담긴 그릇만 한두 문장으로 짧게 설명해 주세요. "
     "이물질이나 쏟아진 것처럼 눈에 띄는 문제가 보이면 함께 말해 주세요. 맛, 온도, 조리법은 쓰지 마세요."
 )
+# At serving time the dish name is unknown, but the store's menu and the customer's review are:
+# naming the dish becomes picking from the menu (Config.photo_context).
+MAX_HINT_CHARS = 300
+
+
+def context_prompt(review=None, menu=None):
+    """Description question with the store's menu and the review as hints (either may be None)."""
+    lines = ["이 사진은 손님이 리뷰와 함께 올린 사진입니다."]
+    if menu:
+        lines.append(f"가게 메뉴: {menu[:MAX_HINT_CHARS]}")
+    if review:
+        lines.append(f"손님 리뷰: {review[:MAX_HINT_CHARS]}")
+    lines.append(
+        "사진 속 음식이 메뉴 중 무엇인지 먼저 쓰고, 사진에 보이는 모양과 양, 이물질이나 쏟아진 것 같은 "
+        "문제가 있으면 한두 문장으로 설명해 주세요. 리뷰는 참고만 하고 사진에 실제로 보이는 것만 쓰세요. "
+        "맛, 온도, 조리법은 쓰지 마세요."
+    )
+    return "\n".join(lines)
+
+
+def menu_text(document_text):
+    """The '## 메뉴' section of a store document as one line, or '' when there is none."""
+    items, inside = [], False
+    for line in document_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            inside = "메뉴" in stripped
+            continue
+        if inside and stripped:
+            items.append(stripped.lstrip("-* ").strip())
+    return " / ".join(items)
+
+
+def store_menus(documents):
+    """{app_id: menu line} from store documents (several documents of one store are joined)."""
+    menus = {}
+    for doc in documents:
+        text = menu_text(doc.text)
+        if text:
+            menus[doc.app_id] = f"{menus[doc.app_id]} / {text}" if doc.app_id in menus else text
+    return menus
 
 
 def check_image(path):
@@ -100,10 +141,16 @@ class PhotoDescriber:
         prompt = prompt or self.prompt
         return hashlib.sha256(f"{content}|{prompt}|{self.max_tokens}|{identity}".encode()).hexdigest()
 
-    def describe(self, path, food=None):
+    def describe(self, path, food=None, review=None, menu=None):
         """Description of the photo. food: the dish name when it is known (labelled training
-        photos), so the 3B model describes the right dish instead of guessing it."""
-        prompt = HINT_PROMPT.format(food=food) if food else self.prompt
+        photos), so the 3B model describes the right dish instead of guessing it. review / menu:
+        the customer's review and the store's menu as hints when the dish is not known."""
+        if food:
+            prompt = HINT_PROMPT.format(food=food)
+        elif review or menu:
+            prompt = context_prompt(review, menu)
+        else:
+            prompt = self.prompt
         cache = self.directory / f"{self.key(path, prompt)}.json"
         if cache.exists():
             return json.loads(cache.read_text(encoding="utf-8"))["text"]

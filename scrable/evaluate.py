@@ -157,7 +157,12 @@ def evaluate(
         from .photos import build_describer
 
         describer = build_describer(config)
-    scorer = ScoredResponseGenerator(response_llm, judge_llm, retriever, config, describer)
+    menus = None
+    if config.photo_context:
+        from .photos import store_menus
+
+        menus = store_menus(documents)
+    scorer = ScoredResponseGenerator(response_llm, judge_llm, retriever, config, describer, menus)
     feedback = scorer(prompt, reviews, description=f"{split} split: {label}")
     speed = seconds_summary(scorer.generation_seconds)
     summary = summarize(feedback)
