@@ -35,7 +35,14 @@ python -m venv .venv
 
 캐시(`llm_cache`, `rag`), 사람 평가 응답, 사진은 올리지 않습니다. 실험을 다시 돌리면 `outputs/` 아래에 새로 생깁니다.
 
-**학습한 최종 모델(LoRA 어댑터, 62MB)은 레포에 없습니다.** 모델이 커질수록 파일도 커지고 Git 기록에 계속 남기 때문입니다. **구글 드라이브**에 `scrable-stage2-adapter.zip`으로 올려 두었습니다(공유 링크는 팀 공지 참고). 압축을 풀어 나온 `adapter/` 폴더를 `outputs/stage2/adapter/`에 넣으면 RUN_SERVE.md가 그대로 동작합니다. 직접 만들려면 레포의 학습 쌍으로 2단계 학습을 다시 하면 됩니다(GPU 수 분, API 비용 없음).
+**학습한 최종 모델(LoRA 어댑터, 약 60MB)은 레포에 없습니다.** 모델이 커질수록 파일도 커지고 Git 기록에 계속 남기 때문입니다. **구글 드라이브**(공유 링크는 팀 공지 참고)에 두 가지가 있습니다.
+
+| 파일 | 모델 | 두는 곳 |
+|---|---|---|
+| `scrable-stage4-photo-adapter.zip` (**최신, `configs/serve.json` 기본값**) | 사진 리뷰까지 학습. 사진 리뷰 답글 점수 0.647 → 0.709, 글 리뷰는 2단계와 같음 | 압축을 풀어 `adapter/` 폴더를 `outputs/stage4_photo/adapter/`에 넣습니다. 같이 든 `stage4_prompt.txt`는 레포 `prompts/`에 이미 있습니다 |
+| `scrable-stage2-adapter.zip` (이전) | 글 리뷰만 학습한 2단계 모델 | `outputs/stage2/adapter/`. 쓰려면 `serve.json`의 `response_adapter`를 이 폴더로, `base_prompt_file`을 `prompts/stage1_best_prompt.txt`로 바꿉니다 |
+
+어댑터는 HyperCLOVA X SEED 라이선스라 팀 내부에서만 씁니다. 직접 만들려면 RUN_STAGE2.md, RUN_STAGE4.md 순서로 다시 학습하면 됩니다.
 
 ## 빠른 시작
 

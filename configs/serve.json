@@ -1,12 +1,12 @@
 {
-  "_comment": "SCRABLE gRPC server for the backend (CustomerAssistant.DraftReply). Stage-2 model and prompt; store documents from data/store_docs/<store_id>. store_aliases maps a backend store_id to a documents folder, e.g. {\"1\": \"bunsik-01\"}.",
+  "_comment": "SCRABLE gRPC server for the backend (CustomerAssistant.DraftReply). Stage-4 photo model (outputs/stage4_photo/adapter, from scrable-stage4-photo-adapter.zip) and its prompt; for the older stage-2 model use outputs/stage2/adapter with prompts/stage1_best_prompt.txt; store documents from data/store_docs/<store_id>. store_aliases maps a backend store_id to a documents folder, e.g. {\"1\": \"bunsik-01\"}.",
   "base": {
     "backend": "local",
     "model": "naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-1.5B",
-    "response_adapter": "outputs/stage2/adapter",
+    "response_adapter": "outputs/stage4_photo/adapter",
     "device": "auto",
     "documents_dir": "data/store_docs",
-    "base_prompt_file": "prompts/stage1_best_prompt.txt",
+    "base_prompt_file": "prompts/stage4_prompt.txt",
     "embedding_model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
     "knowledge_size": 0,
     "top_k": 2,

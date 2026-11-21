@@ -35,7 +35,7 @@ scp "$env:USERPROFILE\Downloads\scrable_serve.tgz" root@<서버IP>:/opt/scrable/
 
 ## 2. [서버] 풀고 gRPC 패키지 설치 (2분)
 
-학습한 어댑터(`outputs/stage2/adapter`)와 가게 문서(`data/store_docs`)가 있는 기존 폴더에 풉니다.
+학습한 어댑터(`outputs/stage4_photo/adapter`, 드라이브의 `scrable-stage4-photo-adapter.zip`)와 가게 문서(`data/store_docs`)가 있는 기존 폴더에 풉니다.
 
 ```bash
 cd /opt/scrable/scrable_stage1 && tar -xzf ../scrable_serve.tgz --strip-components=1
@@ -48,7 +48,7 @@ cd /opt/scrable/scrable_stage1 && tar -xzf ../scrable_serve.tgz --strip-componen
 마지막에 `Successfully installed ...`가 나오면 됩니다. 필요한 파일이 다 있는지 확인합니다:
 
 ```bash
-ls configs/serve.json outputs/stage2/adapter data/store_docs
+ls configs/serve.json outputs/stage4_photo/adapter data/store_docs
 ```
 
 ---
@@ -86,7 +86,7 @@ tail -f serve.log
 이 줄이 나오면 준비된 것입니다 (`Ctrl+C`는 보기만 멈춥니다):
 
 ```
-SCRABLE gRPC server listening on 0.0.0.0:50053 (adapter outputs/stage2/adapter)
+SCRABLE gRPC server listening on 0.0.0.0:50053 (adapter outputs/stage4_photo/adapter)
 ```
 
 ---
