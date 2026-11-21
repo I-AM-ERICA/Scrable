@@ -372,3 +372,24 @@ def test_synthetic_reviews_follow_plan_and_skip_copies():
     assert dropped >= 1 and all("떡볶이" not in r["review"] for r in rows)
     assert len({r["id"] for r in rows}) == len(rows) and all(r["app_id"] == "store-a" for r in rows)
     assert {r["rating"] for r in rows} == set(RATING_COUNTS)
+
+
+def test_train_dpo_with_dora_saves_a_dora_adapter(tmp_path):
+    pytest.importorskip("peft")
+    from scrable.dpo import train_dpo
+
+    dcfg = DPOConfig(
+        base={**BASE, "model": "tiny-test-model", "output_dir": str(tmp_path)},
+        epochs=1,
+        grad_accum=2,
+        lora_r=4,
+        lora_alpha=8,
+        lora_dropout=0.0,
+        eval_fraction=0.0,
+        use_dora=True,
+    )
+    messages = [{"role": "system", "content": "s"}, {"role": "user", "content": "review"}]
+    pairs = [{"messages": messages, "chosen": "thanks", "rejected": "you??"} for _ in range(4)]
+    train_dpo(dcfg, pairs, tiny_model(), CharTokenizer(), "cpu")
+    saved = json.loads((tmp_path / "adapter" / "adapter_config.json").read_text(encoding="utf-8"))
+    assert saved["use_dora"] is True and saved["r"] == 4

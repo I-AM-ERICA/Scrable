@@ -74,6 +74,9 @@ class DPOConfig:
     lora_alpha: int = 32
     lora_dropout: float = 0.05
     lora_targets: list[str] = field(default_factory=lambda: list(LORA_TARGETS))
+    # DoRA (weight-decomposed LoRA, Liu et al. 2024): learns each weight's magnitude and direction
+    # separately; usually closer to full fine-tuning at the same rank, a bit slower to train.
+    use_dora: bool = False
     gradient_checkpointing: bool = False
 
     def __post_init__(self):
@@ -587,6 +590,7 @@ def train_dpo(dcfg, pairs=None, model=None, tokenizer=None, device=None):
         lora_alpha=dcfg.lora_alpha,
         lora_dropout=dcfg.lora_dropout,
         target_modules=dcfg.lora_targets,
+        use_dora=dcfg.use_dora,
     )
     model = get_peft_model(model, lora)
     if dcfg.gradient_checkpointing:
