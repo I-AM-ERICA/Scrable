@@ -4,19 +4,29 @@ import random
 from concurrent.futures import ThreadPoolExecutor
 
 from .llm import structured_call
-from .prompts import GROUNDING_RULES, PHOTO_RUBRIC_NOTES, PHOTO_RULES, PROMPT_GEN_SYSTEM, judge_system, rubric
+from .prompts import (
+    GROUNDING_RULES,
+    IMAGE_RULES,
+    PHOTO_RUBRIC_NOTES,
+    PHOTO_RULES,
+    PROMPT_GEN_SYSTEM,
+    judge_system,
+    rubric,
+)
 from .rag import context_payload
 from .types import CRITERIA, Feedback
 
 DOCUMENT_CRITERIA = ("specificity", "accuracy")
 
 
-def generation_messages(prompt, review, chunks, channel="review", photo_description=None):
+def generation_messages(prompt, review, chunks, channel="review", photo_description=None, photo_image=None):
     """Exact chat input of the response generator; stage-2 training reuses it unchanged.
 
     channel="email" puts the text under "email" instead of "review"; nothing else changes.
     photo_description (photo reviews) adds that field and PHOTO_RULES; without it the input is
-    exactly the training input.
+    exactly the training input. photo_image (a path, for generators that see images) attaches
+    the photo itself to the user message, with IMAGE_RULES; the image part carries the file's
+    sha256 so cached answers change when the photo does.
     """
     # Expert reference is deliberately absent from response-generation inputs.
     payload = {
@@ -30,26 +40,50 @@ def generation_messages(prompt, review, chunks, channel="review", photo_descript
     if photo_description:
         payload["photo_description"] = photo_description
         system += "\n\n" + PHOTO_RULES
+    user = json.dumps(payload, ensure_ascii=False)
+    if photo_image:
+        import hashlib
+        from pathlib import Path
+
+        system += "\n\n" + IMAGE_RULES
+        digest = hashlib.sha256(Path(photo_image).read_bytes()).hexdigest()
+        user = [{"type": "image", "path": str(photo_image), "sha256": digest}, {"type": "text", "text": user}]
     return [
         {"role": "system", "content": system},
-        {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+        {"role": "user", "content": user},
     ]
 
 
 class ScoredResponseGenerator:
-    def __init__(self, response_llm, judge_llm, retriever, config, describer=None, menus=None):
+    def __init__(
+        self, response_llm, judge_llm, retriever, config, describer=None, menus=None, fixed_descriptions=None
+    ):
         self.response_llm = response_llm
         self.judge_llm = judge_llm
         self.retriever = retriever
         self.config = config
         self.describer = describer  # PhotoDescriber (scrable/photos.py) or None
         self.menus = menus or {}  # app_id -> menu line, used when config.photo_context
+        # review_id -> photo description taken from an earlier run (config.photo_descriptions_from),
+        # so a different generator gets exactly the same descriptions.
+        self.fixed_descriptions = fixed_descriptions or {}
         self.photo_descriptions = {}
 
     def generate(self, prompt, review):
         chunks = self.retriever.retrieve(review.review, review.app_id, self.config.top_k)
         description = None
-        if review.image and self.describer is not None:
+        if review.image and getattr(self.config, "photo_input", "description") == "image":
+            prediction = self.response_llm.complete(
+                generation_messages(prompt, review, chunks, self.config.channel, photo_image=review.image),
+                max_tokens=self.config.response_tokens,
+            )
+            if not prediction.strip():
+                raise ValueError("Empty generated response")
+            return prediction, chunks
+        if review.image and review.id in self.fixed_descriptions:
+            description = self.fixed_descriptions[review.id]
+            self.photo_descriptions[review.id] = description
+        elif review.image and self.describer is not None:
             if getattr(self.config, "photo_context", False):
                 # Menu only: with the review text the vision model copied the complaint into the
                 # description (see photos.context_prompt).

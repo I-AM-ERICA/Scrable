@@ -137,7 +137,15 @@ def prepare_all(config):
 
 
 def evaluate(
-    config, label, reference=None, prepared=None, llms=None, retriever=None, split="test", describer=None
+    config,
+    label,
+    reference=None,
+    prepared=None,
+    llms=None,
+    retriever=None,
+    split="test",
+    describer=None,
+    limit=None,
 ):
     if split not in SPLITS:
         raise ValueError(f"split must be one of {sorted(SPLITS)}")
@@ -145,6 +153,8 @@ def evaluate(
         prepared = prepare_all(config) if split == "all" else prepare_data(config)
     splits, documents, _ = prepared
     reviews = [r for name in SPLITS[split] or ("all",) for r in splits[name]]
+    if limit:  # Pilot run on the first few reviews (no reference comparison).
+        reviews = reviews[:limit]
     prompt = load_base_prompt(config)
     if retriever is None:
         from .rag import build_retriever
@@ -153,7 +163,16 @@ def evaluate(
     response_llm, judge_llm = (
         llms if llms is not None else build_llms(config, [response_spec(config), config.role("judge")])
     )
-    if describer is None and config.image_model and any(r.image for r in reviews):
+    fixed = None
+    if config.photo_descriptions_from:
+        earlier = json.loads(Path(config.photo_descriptions_from).read_text(encoding="utf-8"))
+        fixed = {
+            p["review_id"]: p["photo_description"]
+            for p in earlier["predictions"]
+            if p.get("photo_description")
+        }
+    needs_describer = config.photo_input == "description" and not fixed
+    if describer is None and needs_describer and config.image_model and any(r.image for r in reviews):
         from .photos import build_describer
 
         describer = build_describer(config)
@@ -162,8 +181,17 @@ def evaluate(
         from .photos import store_menus
 
         menus = store_menus(documents)
-    scorer = ScoredResponseGenerator(response_llm, judge_llm, retriever, config, describer, menus)
+    scorer = ScoredResponseGenerator(response_llm, judge_llm, retriever, config, describer, menus, fixed)
     feedback = scorer(prompt, reviews, description=f"{split} split: {label}")
+    gpu_peak_gb = None
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            gpu_peak_gb = round(torch.cuda.max_memory_allocated() / 1e9, 2)
+            print(f"GPU peak memory (this process): {gpu_peak_gb} GB", flush=True)
+    except ImportError:
+        pass
     speed = seconds_summary(scorer.generation_seconds)
     summary = summarize(feedback)
     current = {f.review_id: f.to_dict() for f in feedback}
@@ -178,6 +206,9 @@ def evaluate(
         "prompt": prompt,
         "channel": config.channel,
         "image_model": config.image_model,
+        "photo_input": config.photo_input,
+        "photo_descriptions_from": config.photo_descriptions_from,
+        "gpu_peak_gb": gpu_peak_gb,
         "generation_seconds": speed,
         "evaluation": f"LLM-as-a-Judge ({judge}), not human evaluation",
         "comparisons": comparisons,
@@ -226,6 +257,9 @@ def main():
         action="store_true",
         help="Do not describe photos for the generator (image_model=null); the judge still sees them",
     )
+    parser.add_argument(
+        "--limit", type=int, help="Pilot: score only the first N reviews (use with --output-dir)"
+    )
     args = parser.parse_args()
     config = Config.load(args.config)
     overrides = {"image_model": None} if args.no_photos else {}
@@ -241,7 +275,7 @@ def main():
         overrides["base_prompt_file"] = args.prompt
     if overrides:
         config = Config(**{**config.to_dict(), **overrides})
-    evaluate(config, args.label, args.reference, split=args.split)
+    evaluate(config, args.label, None if args.limit else args.reference, split=args.split, limit=args.limit)
 
 
 if __name__ == "__main__":

@@ -303,3 +303,101 @@ def test_other_vision_models_use_the_generic_loader(monkeypatch, tmp_path):
     )
     describer = build_describer(config)
     assert built == ["Qwen/Qwen2.5-VL-7B-Instruct"] and isinstance(describer.vision, FakeImageText)
+
+
+# ---------------------------------------------------------------- 7B experiment (image-text generator)
+
+
+def test_image_input_attaches_the_photo_itself(tmp_path):
+    from scrable.prompts import IMAGE_RULES
+
+    image = photo(tmp_path)
+    review = Review("r", "떡볶이 맛있어요", "s", image=str(image))
+    messages = generation_messages("p", review, [], photo_image=str(image))
+    assert messages[0]["content"].endswith(IMAGE_RULES)
+    part, text = messages[1]["content"]
+    assert part["type"] == "image" and part["path"] == str(image) and len(part["sha256"]) == 64
+    assert json.loads(text["text"])["review"] == "떡볶이 맛있어요"
+    assert "photo_description" not in text["text"]
+
+
+def test_image_text_llm_turns_parts_into_its_chat(monkeypatch):
+    from scrable.llm import ImageTextLLM, is_image_text
+
+    assert is_image_text("Qwen/Qwen2.5-VL-7B-Instruct")
+    assert not is_image_text("naver-hyperclovax/HyperCLOVAX-SEED-Vision-Instruct-3B")
+    llm = object.__new__(ImageTextLLM)
+    seen = {}
+    monkeypatch.setattr(ImageTextLLM, "_load", staticmethod(lambda path: f"IMG:{path}"))
+
+    def run(chat, images, max_tokens):
+        seen.update(chat=chat, images=images)
+        return "답글"
+
+    llm._run = run
+    messages = [
+        {"role": "system", "content": "지침"},
+        {
+            "role": "user",
+            "content": [{"type": "image", "path": "a.png", "sha256": "x"}, {"type": "text", "text": "리뷰"}],
+        },
+    ]
+    assert llm.complete(messages, 64) == "답글"
+    assert seen["images"] == ["IMG:a.png"]
+    assert seen["chat"][1]["content"] == [{"type": "image"}, {"type": "text", "text": "리뷰"}]
+    assert seen["chat"][0]["content"] == [{"type": "text", "text": "지침"}]
+
+
+def test_make_backend_routes_vl_models(monkeypatch):
+    import scrable.llm as llm_module
+
+    class Fake:
+        def __init__(self, model, device, seed):
+            self.model = model
+
+    monkeypatch.setattr(llm_module, "ImageTextLLM", Fake)
+    config = Config(knowledge_size=0, documents_dir="d")
+    assert llm_module.make_backend("local", "Qwen/Qwen2.5-VL-7B-Instruct", config).model.endswith(
+        "7B-Instruct"
+    )
+    with pytest.raises(ValueError, match="image-text"):
+        llm_module.make_backend("local", "Qwen/Qwen2.5-VL-7B-Instruct", config, adapter="x")
+
+
+def test_generator_uses_photo_or_fixed_descriptions(tmp_path):
+    from scrable.pipeline import ScoredResponseGenerator
+
+    image = photo(tmp_path)
+
+    class Gen:
+        def __init__(self):
+            self.messages = []
+
+        def complete(self, messages, max_tokens):
+            self.messages.append(messages)
+            return "답글"
+
+    class Retriever:
+        def retrieve(self, text, app_id, top_k):
+            return []
+
+    class NoDescriber:
+        def describe(self, *args, **kwargs):
+            raise AssertionError("describer must not run")
+
+    review = Review("r1", "떡볶이 맛있어요", "s1", image=str(image))
+    gen = Gen()
+    config = Config(knowledge_size=0, documents_dir="d", photo_input="image")
+    ScoredResponseGenerator(gen, None, Retriever(), config, NoDescriber()).generate("p", review)
+    assert gen.messages[0][1]["content"][0]["type"] == "image"
+
+    gen = Gen()
+    config = Config(knowledge_size=0, documents_dir="d")
+    scorer = ScoredResponseGenerator(
+        gen, None, Retriever(), config, NoDescriber(), None, {"r1": "빨간 떡볶이"}
+    )
+    scorer.generate("p", review)
+    assert json.loads(gen.messages[0][1]["content"])["photo_description"] == "빨간 떡볶이"
+    assert scorer.photo_descriptions == {"r1": "빨간 떡볶이"}
+    with pytest.raises(ValueError, match="photo_input"):
+        Config(knowledge_size=0, documents_dir="d", photo_input="video")

@@ -69,6 +69,12 @@ class Config:
     # Give the vision model the store's menu (from documents_dir) as a reference, so it names the
     # dish right. Without it Vision-3B often misnamed dishes (see photos.context_prompt).
     photo_context: bool = False
+    # "description": the generator reads the vision model's description (above). "image": the
+    # generator sees the photo itself (needs an image-text generator such as Qwen2.5-VL).
+    photo_input: str = "description"
+    # Reuse the photo descriptions of an earlier run's *_predictions.json instead of describing
+    # again, so two generators are compared on exactly the same descriptions.
+    photo_descriptions_from: str | None = None
 
     def __post_init__(self):
         for name in ("backend", "judge_backend", "prompt_backend"):
@@ -77,6 +83,8 @@ class Config:
                 raise ValueError(f"{name} must be one of {sorted(BACKENDS)}")
         if self.channel not in {"review", "email"}:
             raise ValueError("channel must be review or email")
+        if self.photo_input not in ("description", "image"):
+            raise ValueError('photo_input must be "description" or "image"')
         if self.image_model is not None and (
             not isinstance(self.image_model, str) or "/" not in self.image_model.strip()
         ):

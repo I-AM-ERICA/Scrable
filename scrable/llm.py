@@ -149,6 +149,11 @@ def is_vision(model_name):
     return is_hyperclova(model_name) and "vision" in model_name.lower()
 
 
+def is_image_text(model_name):
+    """Pretrained image-text-to-text models other than HyperCLOVAX Vision (e.g. Qwen2.5-VL)."""
+    return "-vl" in model_name.lower() and not is_vision(model_name)
+
+
 def vision_messages(messages):
     """Our {"role", "content": str} chat as the Vision model's typed content list."""
     return [{"role": m["role"], "content": [{"type": "text", "text": m["content"]}]} for m in messages]
@@ -309,19 +314,45 @@ class ImageTextLLM:
             "decode": "greedy-v1",
         }
 
-    def describe_image(self, image_path, question, max_tokens=256):
-        import torch
+    @staticmethod
+    def _load(path):
         from PIL import Image
 
-        with Image.open(image_path) as source:
-            image = source.convert("RGB")
-        chat = [{"role": "user", "content": [{"type": "image"}, {"type": "text", "text": question}]}]
+        with Image.open(path) as source:
+            return source.convert("RGB")
+
+    def _run(self, chat, images, max_tokens):
+        import torch
+
         text = self.processor.apply_chat_template(chat, tokenize=False, add_generation_prompt=True)
-        inputs = self.processor(text=[text], images=[image], return_tensors="pt").to(self.device)
+        inputs = self.processor(text=[text], images=images or None, return_tensors="pt").to(self.device)
         with torch.inference_mode():
             output = self.model.generate(**inputs, max_new_tokens=max_tokens, do_sample=False)
         new = output[0, inputs["input_ids"].shape[-1] :]
         return self.processor.decode(new, skip_special_tokens=True).strip()
+
+    def describe_image(self, image_path, question, max_tokens=256):
+        chat = [{"role": "user", "content": [{"type": "image"}, {"type": "text", "text": question}]}]
+        return self._run(chat, [self._load(image_path)], max_tokens)
+
+    def complete(self, messages, max_tokens):
+        """Our chat as the reply generator. A user message may be a list of parts:
+        {"type": "image", "path": ...} and {"type": "text", "text": ...} (see generation_messages)."""
+        chat, images = [], []
+        for message in messages:
+            content = message["content"]
+            if isinstance(content, str):
+                parts = [{"type": "text", "text": content}]
+            else:
+                parts = []
+                for part in content:
+                    if part["type"] == "image":
+                        images.append(self._load(part["path"]))
+                        parts.append({"type": "image"})
+                    else:
+                        parts.append({"type": "text", "text": part["text"]})
+            chat.append({"role": message["role"], "content": parts})
+        return self._run(chat, images, max_tokens)
 
 
 class OpenAILLM:
@@ -441,6 +472,10 @@ def make_backend(backend, model, config, adapter=None):
         if adapter:
             raise ValueError("LoRA adapters on the Vision model are not supported yet")
         return VisionLLM(model, config.device, config.context_tokens, config.seed)
+    if backend == "local" and is_image_text(model):
+        if adapter:
+            raise ValueError("LoRA adapters on image-text models are not supported yet")
+        return ImageTextLLM(model, config.device, config.seed)
     if backend == "local":
         return LocalLLM(model, config.device, config.context_tokens, config.seed, adapter)
     if backend == "openai":
