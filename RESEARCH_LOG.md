@@ -3,6 +3,7 @@
 가게비서 앱의 **고객응대 비서(SCRABLE)** 를 만들면서 한 실험, 결과, 앞으로 할 일을 한곳에 모은 문서입니다. 실행 방법은 각 `RUN_*.md`에 있습니다.
 
 - 모델: HyperCLOVAX-SEED-Text-Instruct-1.5B + LoRA(DPO 학습)
+- **최종 모델 (2026-11-22 확정)**: 1.5B + 사진 어댑터 `outputs/stage4_photo/adapter`(r=16, 드라이브 `scrable-stage4-photo-adapter.zip`) + `prompts/stage4_prompt.txt`. 설정은 `configs/serve.json`입니다
 - 채점: Claude Haiku 5.5가 답글을 4개 항목으로 채점합니다(관련성 relevancy, 구체성 specificity, 정확성 accuracy, 문법 grammar). 점수는 0~1이고 overall은 평균입니다.
 - 비교: 같은 리뷰에 대해 두 모델의 점수 차와 95% 신뢰구간을 구합니다. `clear`는 확실한 차이, `chance?`는 우연일 수 있는 차이입니다.
 - 테스트: 가상 매장 4곳의 합성 리뷰 40건(학습에 쓰지 않음)
@@ -34,7 +35,7 @@
 
 - 좋은 답의 88%가 Haiku 답이라서, 사실상 Haiku를 따라 배우는 학습(증류)에 가깝습니다.
 - **사람 평가**(2명, 16건, 블라인드): Haiku > DPO > 개선 프롬프트 순서였습니다. 사람이 본 DPO와 Haiku의 차이가 LLM 채점보다 컸기 때문에, Haiku 채점이 Haiku를 봐줬다고 보기는 어렵습니다.
-- **지금 서버 모델은 이 2단계 결과입니다.** 어댑터는 62MB이고 git이 아니라 구글 드라이브에 있습니다.
+- 2단계 어댑터는 62MB이고 git이 아니라 구글 드라이브에 있습니다. 서버 모델은 나중에 아래 "4단계 사진" 모델로 바꿨습니다.
 
 ### 3단계: 구체성 올리기 시도 → [RUN_STAGE3.md](RUN_STAGE3.md)
 
@@ -259,7 +260,7 @@ Haiku와의 차이가 주로 구체성이라, 1.5B 답글을 여러 개 만들�
 - [x] 사람이 확인한 사진 사실 넣기, Haiku로 상한 보기: 사진 정보를 바꿔도 점수가 거의 그대로. 지금 사진 테스트로는 사진 쪽을 더 잴 수 없음
 - [ ] (멈춤) 리뷰별 사진 정보 활용 시트 채우기 ([RUN_PHOTO_FACTS.md](RUN_PHOTO_FACTS.md) 5절)
 - [ ] (멈춤) 사진에만 정보가 있는 리뷰로 새 사진 테스트 만들기 (출처가 확실한 사진, 눈에 보이는 문제 사진 포함)
-- [ ] 새 어댑터(`outputs/stage4_photo/adapter`)를 드라이브에 올리고 레포 `configs/serve.json`도 바꾸기
+- [x] 새 어댑터(`outputs/stage4_photo/adapter`)를 드라이브에 올리고 레포 `configs/serve.json`도 바꾸기 (드라이브 `scrable-stage4-photo-adapter.zip`, README 참고)
 - [x] 답글 여러 개 중 고르기의 상한 보기: 상한 +0.10~0.13이지만 대부분 샘플링 손해를 되찾는 정도이고 구체성은 거의 그대로. 점수 예측 모델은 만들지 않고 멈춤
 - [ ] (선택) 사람 평가 다시 하기 (구글 폼, `scripts/human_eval.py form`)
 - [ ] 사진 답글을 서비스에 붙이려면 백엔드 담당자와 gRPC 규약에 사진 칸 추가. 이때 사진 설명은 Vision-3B + 메뉴 참고로 켜기: `configs/serve.json`의 base에 `"image_model": "naver-hyperclovax/HyperCLOVAX-SEED-Vision-Instruct-3B"`, `"photo_context": true`를 넣고, 서버(`scrable/serve.py`)에서 받은 사진을 임시 파일로 저장해 `draft(..., image=경로)`로 넘기기. 서비스 쪽 사진 설명과 가게 메뉴 넘기기는 준비됨(사진 설명은 디스크에 남기지 않음)
