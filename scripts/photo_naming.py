@@ -3,7 +3,7 @@
     python scripts/photo_naming.py --reviews data/photo_reviews_v2.jsonl \
         Vision-3B=outputs/photo_eval_stage4/all_predictions.json \
         Vision-3B+메뉴=outputs/photo_eval_context2/all_predictions.json \
-        Qwen=outputs/photo_qwen/all_predictions.json
+        Qwen=outputs/photo_eval_qwen/all_predictions.json \n        Qwen+메뉴=outputs/photo_eval_qwen_context/all_predictions.json
 
 Each NAME=FILE is an earlier evaluation's predictions (they keep the photo description of every
 review). Descriptions are matched to photos through the review file, and checked against
