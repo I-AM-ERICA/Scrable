@@ -148,9 +148,15 @@ def knowledge_documents(rows):
 
 
 def load_documents(directory, app_id):
-    """Load user-supplied TXT/MD/PDF documents as current product documentation."""
+    """Load user-supplied TXT/MD/PDF documents as current store/product documentation.
+
+    Files directly in `directory` belong to `app_id`. Files under a subfolder belong to the
+    store/app named by that first-level folder, e.g. documents/store-001/menu.md -> "store-001",
+    so each review only retrieves its own store's documents.
+    """
+    root = Path(directory)
     documents = []
-    for path in sorted(Path(directory).rglob("*")):
+    for path in sorted(root.rglob("*")):
         if not path.is_file() or path.suffix.lower() not in {".txt", ".md", ".pdf"}:
             continue
         if path.suffix.lower() == ".pdf":
@@ -160,7 +166,9 @@ def load_documents(directory, app_id):
         else:
             text = path.read_text(encoding="utf-8")
         if text.strip():
-            documents.append(Document(digest([str(path), text])[:24], text, app_id, str(path)))
+            parts = path.relative_to(root).parts
+            owner = parts[0] if len(parts) > 1 else app_id
+            documents.append(Document(digest([str(path), text])[:24], text, owner, str(path)))
     if not documents:
         raise ValueError(f"No readable TXT/MD/PDF documents found in {directory}")
     return documents

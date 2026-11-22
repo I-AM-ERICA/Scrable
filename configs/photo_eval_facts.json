@@ -1,0 +1,18 @@
+{
+  "_comment": "Photo-facts experiment, condition 3: the current server model (1.5B + photo adapter, stage-4 prompt) gets person-checked photo facts (outputs/photo_facts/descriptions.json, made by scripts/photo_facts.py build) in the same photo_description field instead of Vision-3B's description. Compare with outputs/photo_eval_stage4 (condition 2) and the --no-photos run (condition 1). See RUN_PHOTO_FACTS.md. --split all.",
+  "backend": "local",
+  "model": "naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-1.5B",
+  "response_adapter": "outputs/stage4_photo/adapter",
+  "judge_backend": "anthropic",
+  "judge_model": "claude-haiku-5-5",
+  "judge_workers": 4,
+  "device": "auto",
+  "custom_data": "data/photo_reviews_v2.jsonl",
+  "documents_dir": "data/store_docs",
+  "base_prompt_file": "prompts/stage4_prompt.txt",
+  "embedding_model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+  "knowledge_size": 0,
+  "top_k": 2,
+  "output_dir": "outputs/photo_eval_facts",
+  "photo_descriptions_from": "outputs/photo_facts/descriptions.json"
+}

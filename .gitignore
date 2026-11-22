@@ -6,8 +6,36 @@ __pycache__/
 .ruff_cache/
 .ipynb_checkpoints/
 .env
-data/
-outputs/
+# data/: caches and downloads stay local. Shared on purpose: the synthetic experiment data
+# (Claude-written reviews and fictional stores, see data/DATA_SOURCE.md). Never real customer data
+# or photos.
+data/*
+!data/DATA_SOURCE.md
+!data/store_reviews.jsonl
+!data/store_docs/
+!data/train_store_docs/
+!data/dpo_reviews.jsonl
+# outputs/: experiment working folder. Shared on purpose: final results and the stage-2 training
+# pairs (so others can compare and retrain without paying for API
+# calls again). Caches, human-rater files and photos stay local. The trained adapter is NOT in git
+# (model files grow with model size and stay in git history forever); see README.
+outputs/**
+!outputs/**/
+!outputs/stage1/test_predictions.json
+!outputs/stage2/pairs.jsonl
+!outputs/stage2/pairs_summary.json
+!outputs/stage2/train_log.json
+!outputs/stage2_eval/metrics.json
+!outputs/stage2_eval/test_predictions.json
+!outputs/dev/*/metrics.json
+!outputs/dev/*/dev_predictions.json
+!outputs/email/*/metrics.json
+!outputs/email/*/all_predictions.json
+!outputs/photo_eval*/*/metrics.json
+!outputs/photo_eval*/*/all_predictions.json
 dist/
 build/
 .DS_Store
+
+# Generated from scrable/proto by scrable/grpc_gen.py
+scrable/_grpc_gen/

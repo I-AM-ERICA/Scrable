@@ -1,0 +1,19 @@
+{
+  "_comment": "7B experiment: Qwen2.5-VL-7B on the 40 synthetic test reviews (text only), stage-4 prompt, no adapter. Compare with outputs/stage4_photo_eval/test_predictions.json (current server model).",
+  "backend": "local",
+  "model": "Qwen/Qwen2.5-VL-7B-Instruct",
+  "judge_backend": "anthropic",
+  "judge_model": "claude-haiku-5-5",
+  "judge_workers": 4,
+  "device": "auto",
+  "custom_data": "data/store_reviews.jsonl",
+  "documents_dir": "data/store_docs",
+  "base_prompt_file": "prompts/stage4_prompt.txt",
+  "embedding_model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+  "train_size": 30,
+  "validation_size": 10,
+  "test_size": 40,
+  "knowledge_size": 0,
+  "top_k": 2,
+  "output_dir": "outputs/exp7b/text"
+}

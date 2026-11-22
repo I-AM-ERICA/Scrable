@@ -16,6 +16,11 @@ dependencies = [
 [project.optional-dependencies]
 local = ["torch>=2.6,<3", "transformers>=4.51,<5", "accelerate>=1.2,<2", "sentence-transformers>=3.4,<6"]
 api = ["openai>=1.68,<3"]
+anthropic = ["anthropic>=2.9,<3"]
+# Stage 2 LoRA DPO. DPO loss is in scrable/dpo.py; TRL is not needed.
+dpo = ["peft>=0.17,<1"]
+# gRPC server for the backend (python -m scrable.serve)
+serve = ["grpcio>=1.66,<2", "grpcio-tools>=1.66,<2", "grpcio-health-checking>=1.66,<2", "peft>=0.17,<1"]
 azure = ["azure-search-documents>=11.6,<12", "openai>=1.68,<3"]
 notebook = ["jupyterlab>=4,<5", "ipykernel>=6,<8", "pandas>=2.2,<3", "matplotlib>=3.8,<4"]
 dev = ["pytest>=8,<10", "nbformat>=5,<6", "nbclient>=0.10,<1", "ruff>=0.11,<1"]

@@ -1,0 +1,18 @@
+{
+  "_comment": "Photo reviews, plan A: Vision-3B describes each photo, the stage-2 model (1.5B + LoRA) replies. The Claude judge sees the photo itself. Run with --split all; add --no-photos for the same reviews without photo descriptions.",
+  "backend": "local",
+  "model": "naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-1.5B",
+  "response_adapter": "outputs/stage2/adapter",
+  "image_model": "naver-hyperclovax/HyperCLOVAX-SEED-Vision-Instruct-3B",
+  "judge_backend": "anthropic",
+  "judge_model": "claude-haiku-5-5",
+  "judge_workers": 8,
+  "device": "auto",
+  "custom_data": "data/photo_reviews.jsonl",
+  "documents_dir": "data/store_docs",
+  "base_prompt_file": "prompts/stage1_best_prompt.txt",
+  "embedding_model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+  "knowledge_size": 0,
+  "top_k": 2,
+  "output_dir": "outputs/photo_eval/with_photos"
+}

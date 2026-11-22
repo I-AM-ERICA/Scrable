@@ -1,64 +1,158 @@
 import json
 import math
 import random
+from concurrent.futures import ThreadPoolExecutor
 
 from .llm import structured_call
-from .prompts import GROUNDING_RULES, JUDGE_SYSTEM, PROMPT_GEN_SYSTEM, RUBRICS
+from .prompts import (
+    GROUNDING_RULES,
+    IMAGE_RULES,
+    PHOTO_RUBRIC_NOTES,
+    PHOTO_RULES,
+    PROMPT_GEN_SYSTEM,
+    judge_system,
+    rubric,
+)
 from .rag import context_payload
 from .types import CRITERIA, Feedback
 
+DOCUMENT_CRITERIA = ("specificity", "accuracy")
+
+
+def generation_messages(prompt, review, chunks, channel="review", photo_description=None, photo_image=None):
+    """Exact chat input of the response generator; stage-2 training reuses it unchanged.
+
+    channel="email" puts the text under "email" instead of "review"; nothing else changes.
+    photo_description (photo reviews) adds that field and PHOTO_RULES; without it the input is
+    exactly the training input. photo_image (a path, for generators that see images) attaches
+    the photo itself to the user message, with IMAGE_RULES; the image part carries the file's
+    sha256 so cached answers change when the photo does.
+    """
+    # Expert reference is deliberately absent from response-generation inputs.
+    payload = {
+        "app_id": review.app_id,
+        channel: review.review,
+        "retrieved_documents": context_payload(chunks),
+    }
+    if review.rating is not None:
+        payload["rating"] = review.rating
+    system = prompt + "\n\n" + GROUNDING_RULES
+    if photo_description:
+        payload["photo_description"] = photo_description
+        system += "\n\n" + PHOTO_RULES
+    user = json.dumps(payload, ensure_ascii=False)
+    if photo_image:
+        import hashlib
+        from pathlib import Path
+
+        system += "\n\n" + IMAGE_RULES
+        digest = hashlib.sha256(Path(photo_image).read_bytes()).hexdigest()
+        user = [{"type": "image", "path": str(photo_image), "sha256": digest}, {"type": "text", "text": user}]
+    return [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+
 
 class ScoredResponseGenerator:
-    def __init__(self, response_llm, judge_llm, retriever, config):
+    def __init__(
+        self, response_llm, judge_llm, retriever, config, describer=None, menus=None, fixed_descriptions=None
+    ):
         self.response_llm = response_llm
         self.judge_llm = judge_llm
         self.retriever = retriever
         self.config = config
+        self.describer = describer  # PhotoDescriber (scrable/photos.py) or None
+        self.menus = menus or {}  # app_id -> menu line, used when config.photo_context
+        # review_id -> photo description taken from an earlier run (config.photo_descriptions_from),
+        # so a different generator gets exactly the same descriptions.
+        self.fixed_descriptions = fixed_descriptions or {}
+        self.photo_descriptions = {}
 
     def generate(self, prompt, review):
         chunks = self.retriever.retrieve(review.review, review.app_id, self.config.top_k)
-        # Expert reference is deliberately absent from response-generation inputs.
-        payload = {
-            "app_id": review.app_id,
-            "review": review.review,
-            "retrieved_documents": context_payload(chunks),
-        }
+        description = None
+        if review.image and getattr(self.config, "photo_input", "description") == "image":
+            prediction = self.response_llm.complete(
+                generation_messages(prompt, review, chunks, self.config.channel, photo_image=review.image),
+                max_tokens=self.config.response_tokens,
+            )
+            if not prediction.strip():
+                raise ValueError("Empty generated response")
+            return prediction, chunks
+        if review.image and review.id in self.fixed_descriptions:
+            description = self.fixed_descriptions[review.id]
+            self.photo_descriptions[review.id] = description
+        elif review.image and self.describer is not None:
+            if getattr(self.config, "photo_context", False):
+                # Menu only: with the review text the vision model copied the complaint into the
+                # description (see photos.context_prompt).
+                description = self.describer.describe(review.image, menu=self.menus.get(review.app_id))
+            else:
+                description = self.describer.describe(review.image)
+            self.photo_descriptions[review.id] = description
         prediction = self.response_llm.complete(
-            [
-                {"role": "system", "content": prompt + "\n\n" + GROUNDING_RULES},
-                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
-            ],
+            generation_messages(prompt, review, chunks, self.config.channel, description),
             max_tokens=self.config.response_tokens,
         )
         if not prediction.strip():
             raise ValueError("Empty generated response")
         return prediction, chunks
 
-    def judge(self, review, prediction, chunks):
+    def judge_criterion(self, review, prediction, chunks, criterion):
+        channel = self.config.channel
+        note = PHOTO_RUBRIC_NOTES.get(criterion, "") if review.image else ""
+        payload = {
+            "criterion": criterion,
+            "rubric": rubric(criterion, channel) + note,
+            "app_id": review.app_id,
+            channel: review.review,
+            "prediction": prediction,
+        }
+        if review.rating is not None:
+            payload["rating"] = review.rating
+        # Specificity and accuracy see the retrieved store documents, so facts taken from them are
+        # not penalized as invented. Only accuracy sees the expert answer (paper's setup).
+        if criterion in DOCUMENT_CRITERIA:
+            payload["retrieved_documents"] = context_payload(chunks)
+        if criterion == "accuracy":
+            payload["expert_response"] = review.expert_response
+        content = json.dumps(payload, ensure_ascii=False)
+        # Only the criteria with a photo note (relevancy, accuracy) look at the photo: specificity and
+        # grammar do not depend on it, and each attached photo costs about 1,000 input tokens.
+        if review.image and criterion in PHOTO_RUBRIC_NOTES:
+            # The judge sees the customer's photo itself (Claude image input), not the description.
+            if self.config.role("judge")[0] != "anthropic":
+                raise ValueError("Photo reviews need judge_backend=anthropic (the judge must see the photo)")
+            from .photos import image_block
+
+            content = [
+                image_block(review.image),
+                {"type": "text", "text": "첨부된 사진은 손님이 리뷰에 올린 사진입니다.\n" + content},
+            ]
+        return structured_call(
+            self.judge_llm,
+            [
+                {"role": "system", "content": judge_system(channel)},
+                {"role": "user", "content": content},
+            ],
+            validate_judgment,
+            self.config.judge_tokens,
+            self.config.json_attempts,
+        )
+
+    def _map(self, function, items):
+        workers = min(self.config.judge_workers, len(items))
+        if workers <= 1:
+            return [function(item) for item in items]
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            return list(pool.map(function, items))
+
+    @staticmethod
+    def feedback(review, prediction, chunks, results, photo_description=None):
         scores, rationales, suggestions = {}, {}, []
-        for criterion in CRITERIA:
-            payload = {
-                "criterion": criterion,
-                "rubric": RUBRICS[criterion],
-                "app_id": review.app_id,
-                "review": review.review,
-                "prediction": prediction,
-            }
-            # Match paper's evaluation setup: only accuracy sees the expert answer.
-            if criterion == "accuracy":
-                payload.update(
-                    expert_response=review.expert_response, retrieved_documents=context_payload(chunks)
-                )
-            result = structured_call(
-                self.judge_llm,
-                [
-                    {"role": "system", "content": JUDGE_SYSTEM},
-                    {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
-                ],
-                validate_judgment,
-                self.config.judge_tokens,
-                self.config.json_attempts,
-            )
+        for criterion in CRITERIA:  # Fixed order keeps results reproducible under parallel judging.
+            result = results[criterion]
             scores[criterion] = result["score"]
             rationales[criterion] = result["reason"]
             suggestions.extend(f"[{criterion}] {item}" for item in result["suggestions"])
@@ -71,6 +165,13 @@ class ScoredResponseGenerator:
             suggestions,
             rationales,
             [c.id for c in chunks],
+            photo_description,
+        )
+
+    def judge(self, review, prediction, chunks):
+        results = self._map(lambda c: self.judge_criterion(review, prediction, chunks, c), list(CRITERIA))
+        return self.feedback(
+            review, prediction, chunks, dict(zip(CRITERIA, results)), self.photo_descriptions.get(review.id)
         )
 
     def __call__(self, prompt, reviews, description="ScoredResponseGen"):
@@ -78,11 +179,35 @@ class ScoredResponseGenerator:
 
         if not reviews:
             raise ValueError("ScoredResponseGen requires nonempty reviews")
-        feedback = []
-        for review in tqdm(reviews, desc=description):
-            prediction, chunks = self.generate(prompt, review)
-            feedback.append(self.judge(review, prediction, chunks))
-        return feedback
+        # Generate sequentially (one local GPU model), then judge every review x criterion.
+        # Seconds per reply are kept for the speed report (a cached reply takes ~0 s).
+        import time
+
+        generated, self.generation_seconds = [], []
+        for review in tqdm(reviews, desc=f"{description}: generate"):
+            start = time.perf_counter()
+            generated.append(self.generate(prompt, review))
+            self.generation_seconds.append(time.perf_counter() - start)
+        tasks = [(i, c) for i in range(len(reviews)) for c in CRITERIA]
+        progress = tqdm(total=len(tasks), desc=f"{description}: judge")
+
+        def run(task):
+            i, criterion = task
+            result = self.judge_criterion(reviews[i], *generated[i], criterion)
+            progress.update(1)
+            return result
+
+        try:
+            results = self._map(run, tasks)
+        finally:
+            progress.close()
+        by_review = [{} for _ in reviews]
+        for (i, criterion), result in zip(tasks, results):
+            by_review[i][criterion] = result
+        return [
+            self.feedback(review, *generated[i], by_review[i], self.photo_descriptions.get(review.id))
+            for i, review in enumerate(reviews)
+        ]
 
 
 def validate_judgment(value):

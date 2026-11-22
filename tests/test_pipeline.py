@@ -36,6 +36,11 @@ def test_reference_only_reaches_accuracy_judge(tmp_path):
     for messages in llm.messages[1:]:
         payload = json.loads(messages[-1]["content"])
         assert ("expert_response" in payload) == (payload["criterion"] == "accuracy")
+        # Store documents reach specificity and accuracy, so documented facts are not "invented".
+        has_documents = "retrieved_documents" in payload
+        assert has_documents == (payload["criterion"] in {"specificity", "accuracy"})
+        if has_documents:
+            assert payload["retrieved_documents"][0]["text"] == "Relevant documented facts"
 
 
 def test_full_experiment_artifacts_and_test_isolation(tmp_path):

@@ -1,0 +1,19 @@
+{
+  "_comment": "Ground truth for the 16 photo-test photos (data/review_photos), labelled by looking at each photo. A description counts as right when it contains any accepted word. 'use': false marks photos too ambiguous to score (market stall with unclear food; a dish not on the store menu). Used by scripts/photo_naming.py.",
+  "bunsik1.jpg": {"truth": "노점의 튀김과 떡볶이", "accept": ["떡볶이", "튀김"], "use": true},
+  "bunsik2.jpg": {"truth": "김 나는 노점 철판, 음식 불분명", "accept": [], "use": false},
+  "bunsik3.jpg": {"truth": "김밥, 라면, 떡꼬치, 김치", "accept": ["김밥", "라면", "떡꼬치", "떡볶이"], "use": true},
+  "bunsik4.jpg": {"truth": "양념 두부 (메뉴에 없음)", "accept": ["두부"], "use": false},
+  "cafe1.jpg": {"truth": "아이스 아메리카노", "accept": ["아메리카노", "커피", "콜드브루"], "use": true},
+  "cafe2.jpg": {"truth": "아이스 아메리카노 등 음료 여러 잔", "accept": ["아메리카노", "커피", "콜드브루", "아이스티", "음료"], "use": true},
+  "cafe3.jpg": {"truth": "카페라떼(라떼아트)와 크루아상", "accept": ["라떼", "라테", "카푸치노", "플랫화이트"], "use": true},
+  "cafe4.jpg": {"truth": "아이스 카페라떼와 구움과자", "accept": ["라떼", "라테"], "use": true},
+  "chicken1.jpg": {"truth": "후라이드 치킨", "accept": ["후라이드", "프라이드", "튀김 닭", "치킨"], "use": true},
+  "chicken2.jpg": {"truth": "후라이드 치킨과 소스", "accept": ["후라이드", "프라이드", "치킨"], "use": true},
+  "chicken3.jpg": {"truth": "양념치킨, 후라이드, 감자튀김", "accept": ["양념", "후라이드", "프라이드", "치킨"], "use": true},
+  "chicken4.jpg": {"truth": "마늘 크런치 순살 치킨", "accept": ["치킨", "닭", "간장마늘", "마늘"], "use": true},
+  "gukbap1.jpg": {"truth": "돼지국밥(다대기)", "accept": ["국밥", "순대국", "돼지국"], "use": true},
+  "gukbap2.jpg": {"truth": "순대국밥/돼지국밥(부추)", "accept": ["국밥", "순대국", "돼지국"], "use": true},
+  "gukbap3.jpg": {"truth": "순대국밥/돼지국밥(부추)", "accept": ["국밥", "순대국", "돼지국"], "use": true},
+  "gukbap4.jpg": {"truth": "뼈해장국 계열 국밥", "accept": ["국밥", "해장국", "뼈"], "use": true}
+}

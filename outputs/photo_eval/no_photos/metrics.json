@@ -1,0 +1,116 @@
+{
+  "label": "no-photos",
+  "split": "all",
+  "summary": {
+    "overall": 0.7687499999999999,
+    "count": 16,
+    "relevancy": 0.8125,
+    "specificity": 0.484375,
+    "accuracy": 0.859375,
+    "grammar": 0.828125
+  },
+  "generator": "local:naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-1.5B",
+  "adapter": "outputs/stage2/adapter",
+  "prompt": "당신은 가게 사장님을 대신해 고객 리뷰에 답글을 작성하는 담당자입니다. 고객에게 보여줄 답글만 출력하고, 리뷰와 같은 언어로 작성하세요.\n\n[기본 원칙]\n- 고객이 말한 구체적인 내용(칭찬, 불편, 질문)을 먼저 정확히 짚어 응답하세요. 리뷰의 사실을 바꾸거나 과장하지 마세요.\n- 고객이 질문하면 제공된 가게 정보로 직접 답하세요. 정보에 없으면 추측하지 말고 확인 후 안내드리겠다고 말하세요.\n- 칭찬 리뷰는 감사 인사와 리뷰 내용에 맞는 짧은 공감으로 충분합니다. 리뷰와 무관한 매장 정보는 나열하지 마세요.\n\n[불편 사항 대응]\n- 불편을 드린 점에 진심으로 사과하되, 원인이나 책임을 단정하지 마세요. 확인되지 않은 추측(예: 고객의 요청 때문이었을 것이다)은 쓰지 마세요.\n- 환불, 재조리, 교환, 쿠폰 등 보상은 가게 정보에 근거가 있을 때만 언급하세요. 확정되지 않은 처리는 '확인 후 개별 안내드리겠습니다'로 표현하세요.\n- 재발 방지를 말할 때는 실제로 실행 가능한 조치만 언급하고, '반드시', '최선을 다하겠다' 같은 과한 확정 표현은 피하세요.\n- 가게 정보에 연락 경로(배달앱 고객센터, 매장 전화 등)가 있으면 고객이 바로 행동할 수 있도록 필요한 경로만 안내하세요. 주문 번호 등 확인에 필요한 정보를 요청해도 좋습니다.\n- 리뷰 작성을 조건으로 보상을 제시하지 마세요.\n\n[작성 방식]\n- 존댓말을 사용하고, '당신' 대신 '고객님'을 쓰세요.\n- 모든 문장을 완결된 형태로 쓰고, 중간에 끊기거나 말줄임으로 끝나는 문장을 남기지 마세요.\n- 감사 인사와 마무리 인사는 중복하지 말고 한 번만 쓰세요.\n- 대부분의 답글은 3~6문장 안팎으로 간결하게 작성하세요.",
+  "channel": "review",
+  "image_model": null,
+  "generation_seconds": {
+    "mean": 2.9002134030579327,
+    "p90": 3.068165588978445,
+    "max": 4.009799423976801
+  },
+  "evaluation": "LLM-as-a-Judge (anthropic:claude-haiku-5-5), not human evaluation",
+  "comparisons": {
+    "with-photos": {
+      "overall": {
+        "mean": -0.006249999999999985,
+        "low": -0.05312499999999996,
+        "high": 0.04375000000000002,
+        "wins": 4,
+        "losses": 6,
+        "ties": 6
+      },
+      "relevancy": {
+        "mean": 0.03125,
+        "low": 0.0,
+        "high": 0.09375,
+        "wins": 1,
+        "losses": 0,
+        "ties": 15
+      },
+      "specificity": {
+        "mean": -0.015625,
+        "low": -0.078125,
+        "high": 0.046875,
+        "wins": 2,
+        "losses": 3,
+        "ties": 11
+      },
+      "accuracy": {
+        "mean": -0.015625,
+        "low": -0.109375,
+        "high": 0.078125,
+        "wins": 2,
+        "losses": 4,
+        "ties": 10
+      },
+      "grammar": {
+        "mean": -0.015625,
+        "low": -0.09375,
+        "high": 0.0625,
+        "wins": 3,
+        "losses": 4,
+        "ties": 9
+      }
+    }
+  },
+  "reference": [
+    "outputs/photo_eval/with_photos/all_predictions.json"
+  ],
+  "config": {
+    "backend": "local",
+    "model": "naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-1.5B",
+    "judge_backend": "anthropic",
+    "judge_model": "claude-haiku-5-5",
+    "prompt_backend": null,
+    "prompt_model": null,
+    "compare_models": [],
+    "judge_workers": 8,
+    "api_min_output_tokens": 16000,
+    "anthropic_effort": null,
+    "base_prompt_file": "prompts/stage1_best_prompt.txt",
+    "response_adapter": "outputs/stage2/adapter",
+    "device": "auto",
+    "seed": 42,
+    "train_size": 10,
+    "validation_size": 4,
+    "test_size": 4,
+    "knowledge_size": 0,
+    "max_iterations": 2,
+    "threshold": 0.95,
+    "lowest_fraction": 0.3,
+    "random_fraction": 0.1,
+    "dataset_revision": "49068c54a4551304208aea80749f1a4d5ab893d2",
+    "app_id": "com.ubercab.eats",
+    "download_limit": 3000,
+    "max_scan_lines": 100000,
+    "data_dir": "data",
+    "output_dir": "outputs/photo_eval/no_photos",
+    "custom_data": "data/photo_reviews.jsonl",
+    "documents_dir": "data/store_docs",
+    "rag_backend": "local",
+    "embedding_model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+    "azure_embedding_model": "text-embedding-ada-002",
+    "azure_index_prefix": "scrable",
+    "chunk_tokens": 500,
+    "chunk_overlap": 50,
+    "top_k": 2,
+    "context_tokens": 8192,
+    "response_tokens": 256,
+    "judge_tokens": 256,
+    "prompt_tokens": 768,
+    "json_attempts": 3,
+    "channel": "review",
+    "image_model": null
+  }
+}

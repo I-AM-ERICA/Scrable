@@ -1,0 +1,19 @@
+{
+  "_comment": "Email auto-reply test: stage-2 DPO adapter (or --no-adapter for the base 1.5B) on synthetic emails. Run with --split all.",
+  "backend": "local",
+  "model": "naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-1.5B",
+  "response_adapter": "outputs/stage2/adapter",
+  "judge_backend": "anthropic",
+  "judge_model": "claude-haiku-5-5",
+  "judge_workers": 8,
+  "device": "auto",
+  "channel": "email",
+  "custom_data": "data/email_test.jsonl",
+  "documents_dir": "data/store_docs",
+  "base_prompt_file": "prompts/email_prompt.txt",
+  "embedding_model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+  "knowledge_size": 0,
+  "top_k": 2,
+  "response_tokens": 384,
+  "output_dir": "outputs/email/lora"
+}

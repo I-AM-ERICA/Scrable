@@ -1,20 +1,39 @@
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
+
+BACKENDS = {"local", "openai", "anthropic"}
+EFFORTS = {"low", "medium", "high", "xhigh", "max"}
 
 
 @dataclass
 class Config:
+    # Response generator backend/model. Judge and prompt generator default to the same values.
     backend: str = "local"
     model: str = "naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-1.5B"
+    # Stage 1: a strong API judge/prompt generator can teach a small local response generator.
+    judge_backend: str | None = None
     judge_model: str | None = None
+    prompt_backend: str | None = None
     prompt_model: str | None = None
+    # Extra generators scored on the held-out test set with the base prompt, e.g. a large API model.
+    compare_models: list[dict] = field(default_factory=list)
+    # Parallel judge requests. Use >1 only for API judges; a local model is not thread-safe.
+    judge_workers: int = 1
+    # API models can spend output tokens on reasoning. Role token budgets act as a floor of this size.
+    api_min_output_tokens: int = 16000
+    # Optional Claude effort (low|medium|high|xhigh|max). None keeps the model default.
+    anthropic_effort: str | None = None
+    # Optional UTF-8 text file replacing the built-in base prompt (e.g. store-review domain).
+    base_prompt_file: str | None = None
+    # Stage 2: LoRA adapter folder (from `python -m scrable.dpo train`) applied to the local generator.
+    response_adapter: str | None = None
     device: str = "auto"
     seed: int = 42
     train_size: int = 10
     validation_size: int = 4
     test_size: int = 4
-    knowledge_size: int = 64
+    knowledge_size: int = 64  # Past replies reserved for RAG. 0 is allowed when documents_dir is set.
     max_iterations: int = 2  # Number of revisions, excluding baseline (iteration 0).
     threshold: float = 0.95
     lowest_fraction: float = 0.30
@@ -39,17 +58,43 @@ class Config:
     judge_tokens: int = 256
     prompt_tokens: int = 768
     json_attempts: int = 3
+    # "review": store review replies. "email": customer email replies (judge wording and the
+    # generator input key change; criteria and weights stay the same).
+    channel: str = "review"
+    # Photo reviews (plan A): local vision model that describes each review's photo for the
+    # generator: "naver-hyperclovax/HyperCLOVAX-SEED-Vision-Instruct-3B" or any Hugging Face
+    # image-text-to-text model such as "Qwen/Qwen2.5-VL-7B-Instruct" (Apache-2.0). None = photos
+    # unused by the generator (the API judge still sees them).
+    image_model: str | None = None
+    # Give the vision model the store's menu (from documents_dir) as a reference, so it names the
+    # dish right. Without it Vision-3B often misnamed dishes (see photos.context_prompt).
+    photo_context: bool = False
+    # "description": the generator reads the vision model's description (above). "image": the
+    # generator sees the photo itself (needs an image-text generator such as Qwen2.5-VL).
+    photo_input: str = "description"
+    # Reuse the photo descriptions of an earlier run's *_predictions.json instead of describing
+    # again, so two generators are compared on exactly the same descriptions.
+    photo_descriptions_from: str | None = None
 
     def __post_init__(self):
-        if self.backend not in {"local", "openai"}:
-            raise ValueError("backend must be local or openai")
+        for name in ("backend", "judge_backend", "prompt_backend"):
+            value = getattr(self, name)
+            if value is not None and value not in BACKENDS:
+                raise ValueError(f"{name} must be one of {sorted(BACKENDS)}")
+        if self.channel not in {"review", "email"}:
+            raise ValueError("channel must be review or email")
+        if self.photo_input not in ("description", "image"):
+            raise ValueError('photo_input must be "description" or "image"')
+        if self.image_model is not None and (
+            not isinstance(self.image_model, str) or "/" not in self.image_model.strip()
+        ):
+            raise ValueError("image_model must be a Hugging Face model id (org/name) or null")
         if self.rag_backend not in {"local", "azure"}:
             raise ValueError("rag_backend must be local or azure")
         for name in (
             "train_size",
             "validation_size",
             "test_size",
-            "knowledge_size",
             "download_limit",
             "max_scan_lines",
             "top_k",
@@ -59,9 +104,15 @@ class Config:
             "judge_tokens",
             "prompt_tokens",
             "json_attempts",
+            "judge_workers",
+            "api_min_output_tokens",
         ):
             if type(getattr(self, name)) is not int or getattr(self, name) < 1:
                 raise ValueError(f"{name} must be a positive integer")
+        if type(self.knowledge_size) is not int or self.knowledge_size < 0:
+            raise ValueError("knowledge_size must be >= 0")
+        if self.knowledge_size == 0 and not self.documents_dir:
+            raise ValueError("knowledge_size=0 requires documents_dir for RAG documents")
         if type(self.max_iterations) is not int or self.max_iterations < 0:
             raise ValueError("max_iterations must be >= 0")
         if not 0 <= self.threshold <= 1:
@@ -76,10 +127,46 @@ class Config:
             raise ValueError("output budget must be smaller than context_tokens")
         if not self.model.strip() or not self.app_id.strip():
             raise ValueError("model and app_id cannot be empty")
+        for role, backend, model in (
+            ("judge", self.judge_backend, self.judge_model),
+            ("prompt", self.prompt_backend, self.prompt_model),
+        ):
+            if backend not in (None, self.backend) and not (model or "").strip():
+                raise ValueError(f"{role}_model is required when {role}_backend differs from backend")
+        if self.judge_workers > 1 and self.role("judge")[0] == "local":
+            raise ValueError("judge_workers > 1 requires an API judge_backend (openai or anthropic)")
+        if self.response_adapter is not None and self.backend != "local":
+            raise ValueError("response_adapter requires backend=local")
+        if self.anthropic_effort is not None and self.anthropic_effort not in EFFORTS:
+            raise ValueError(f"anthropic_effort must be one of {sorted(EFFORTS)} or null")
+        if not isinstance(self.compare_models, list):
+            raise ValueError("compare_models must be a list")
+        for spec in self.compare_models:
+            if (
+                not isinstance(spec, dict)
+                or set(spec) != {"backend", "model"}
+                or spec["backend"] not in BACKENDS
+                or not isinstance(spec["model"], str)
+                or not spec["model"].strip()
+            ):
+                raise ValueError(
+                    'Each compare_models item must be {"backend": local|openai|anthropic, "model": "..."}'
+                )
+
+    def role(self, name):
+        """Return (backend, model) for the response, judge or prompt role."""
+        if name == "response":
+            return self.backend, self.model
+        if name == "judge":
+            return self.judge_backend or self.backend, self.judge_model or self.model
+        if name == "prompt":
+            return self.prompt_backend or self.backend, self.prompt_model or self.model
+        raise ValueError(f"Unknown role: {name}")
 
     @classmethod
     def load(cls, path):
-        return cls(**json.loads(Path(path).read_text(encoding="utf-8")))
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        return cls(**{k: v for k, v in data.items() if not k.startswith("_")})  # "_comment" keys are notes
 
     def to_dict(self):
         return asdict(self)

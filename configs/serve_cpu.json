@@ -1,0 +1,20 @@
+{
+  "_comment": "Laptop run without a GPU (RUN_LOCAL.md): same model, adapter and prompt as configs/serve.json, on the CPU and only on 127.0.0.1. Start with SCRABLE_CPU_BF16=1 for bfloat16 (about 3.5 GB of memory).",
+  "base": {
+    "backend": "local",
+    "model": "naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-1.5B",
+    "response_adapter": "outputs/stage4_photo/adapter",
+    "device": "cpu",
+    "documents_dir": "data/store_docs",
+    "base_prompt_file": "prompts/stage4_prompt.txt",
+    "embedding_model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+    "knowledge_size": 0,
+    "top_k": 2,
+    "output_dir": "outputs/serve"
+  },
+  "store_aliases": {},
+  "host": "127.0.0.1",
+  "port": 50053,
+  "workers": 8,
+  "max_waiting": 32
+}

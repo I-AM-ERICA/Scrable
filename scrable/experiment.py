@@ -39,6 +39,15 @@ def prepare_data(config):
     return splits, documents, provenance
 
 
+def load_base_prompt(config):
+    if not config.base_prompt_file:
+        return BASE_PROMPT
+    text = Path(config.base_prompt_file).read_text(encoding="utf-8").strip()
+    if not text:
+        raise ValueError(f"base_prompt_file is empty: {config.base_prompt_file}")
+    return text
+
+
 def summarize(feedback):
     return {
         "overall": average_score(feedback),
@@ -58,6 +67,7 @@ def package_versions():
         "transformers",
         "sentence-transformers",
         "openai",
+        "anthropic",
         "numpy",
         "langchain-text-splitters",
         "azure-search-documents",
@@ -69,7 +79,7 @@ def package_versions():
     return result
 
 
-def run_experiment(config, prepared=None, llms=None, retriever=None):
+def run_experiment(config, prepared=None, llms=None, retriever=None, compare_llms=None):
     """Run download -> RAG -> optimize -> held-out test -> export.
 
     Optional object injection makes orchestration testable without model/API calls.
@@ -78,8 +88,10 @@ def run_experiment(config, prepared=None, llms=None, retriever=None):
     directory = Path(config.output_dir)
     directory.mkdir(parents=True, exist_ok=True)
     splits, documents, provenance = prepared if prepared is not None else prepare_data(config)
+    base_prompt = load_base_prompt(config)
     manifest = {
         "config": config.to_dict(),
+        "base_prompt": base_prompt,
         "provenance": provenance,
         "splits": {name: [asdict(r) for r in rows] for name, rows in splits.items()},
         "documents": [asdict(d) for d in documents],
@@ -95,22 +107,45 @@ def run_experiment(config, prepared=None, llms=None, retriever=None):
     write_json(manifest_path, {**manifest, "signature": signature, "versions": package_versions()})
     if retriever is None:
         retriever = build_retriever(config, documents)
+    shared = {}
     if llms is None:
-        llms = build_llms(config)
+        llms = build_llms(config, shared=shared)
+    compare_specs = [(spec["backend"], spec["model"]) for spec in config.compare_models]
+    if compare_llms is None:
+        compare_llms = build_llms(config, compare_specs, shared) if compare_specs else ()
+    if len(compare_llms) != len(compare_specs):
+        raise ValueError("compare_llms must match config.compare_models")
     response_llm, judge_llm, prompt_llm = llms
     scorer = ScoredResponseGenerator(response_llm, judge_llm, retriever, config)
     optimizer = PromptOptimizer(scorer, PromptGenerator(prompt_llm, config), config)
-    result = optimizer.run(splits["train"], splits["validation"])
+    result = optimizer.run(splits["train"], splits["validation"], base_prompt=base_prompt)
     # Test is never supplied to PromptGen, early stopping or prompt selection.
-    baseline = scorer(BASE_PROMPT, splits["test"], description="Held-out test: baseline")
+    baseline = scorer(base_prompt, splits["test"], description="Held-out test: baseline")
     optimized = scorer(result.best_prompt, splits["test"], description="Held-out test: selected prompt")
     metrics = {"baseline": summarize(baseline), "optimized": summarize(optimized)}
     metrics["delta"] = {k: metrics["optimized"][k] - metrics["baseline"][k] for k in ("overall", *CRITERIA)}
+    # Reference generators (e.g. a large API model) answer the same test reviews with the base prompt
+    # and are scored by the same judge: the gap the optimized small model should close.
+    comparisons, comparison_predictions = [], []
+    for (backend, model), llm in zip(compare_specs, compare_llms):
+        feedback = ScoredResponseGenerator(llm, judge_llm, retriever, config)(
+            base_prompt, splits["test"], description=f"Held-out test: {model} (base prompt)"
+        )
+        comparisons.append({"backend": backend, "model": model, "prompt": "base", **summarize(feedback)})
+        comparison_predictions.append(
+            {"backend": backend, "model": model, "predictions": [f.to_dict() for f in feedback]}
+        )
+    judge_backend, judge_model = config.role("judge")
     metrics.update(
+        comparisons=comparisons,
+        roles={
+            role: dict(zip(("backend", "model"), config.role(role)))
+            for role in ("response", "judge", "prompt")
+        },
         best_iteration=result.best_iteration,
         stop_reason=result.stop_reason,
         selection="validation overall score; earliest prompt on ties",
-        evaluation="LLM-as-a-Judge, not human evaluation",
+        evaluation=f"LLM-as-a-Judge ({judge_backend}:{judge_model}), not human evaluation",
         rag_fingerprint=retriever.fingerprint,
         llm_usage=[
             {
@@ -118,7 +153,7 @@ def run_experiment(config, prepared=None, llms=None, retriever=None):
                 "cache_hits": getattr(llm, "hits", None),
                 "backend": getattr(getattr(llm, "backend", llm), "identity", None),
             }
-            for llm in {id(llm): llm for llm in llms}.values()
+            for llm in {id(llm): llm for llm in (*llms, *compare_llms)}.values()
         ],
     )
     write_json(directory / "metrics.json", metrics)
@@ -127,6 +162,7 @@ def run_experiment(config, prepared=None, llms=None, retriever=None):
         {
             "baseline": [f.to_dict() for f in baseline],
             "optimized": [f.to_dict() for f in optimized],
+            "comparisons": comparison_predictions,
         },
     )
     write_json(directory / "result.json", asdict(result))
@@ -159,6 +195,23 @@ def main():
         return
     result = run_experiment(config)
     print(json.dumps(result["metrics"], indent=2, ensure_ascii=False))
+    print(score_table(result["metrics"], config))
+
+
+def score_table(metrics, config):
+    """Plain-text summary of held-out test scores (0-1, LLM judge)."""
+    response = "{}:{}".format(*config.role("response"))
+    rows = [
+        (response, "base", metrics["baseline"]),
+        (response, "optimized", metrics["optimized"]),
+        *[(f"{c['backend']}:{c['model']}", c["prompt"], c) for c in metrics.get("comparisons", [])],
+    ]
+    header = f"{'generator':<60} {'prompt':<10} {'overall':>8} " + " ".join(f"{c:>11}" for c in CRITERIA)
+    lines = ["", f"Held-out test (n={metrics['baseline']['count']}), {metrics['evaluation']}", header]
+    for generator, prompt, scores in rows:
+        values = " ".join(f"{scores[c]:>11.3f}" for c in CRITERIA)
+        lines.append(f"{generator[-60:]:<60} {prompt:<10} {scores['overall']:>8.3f} {values}")
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":

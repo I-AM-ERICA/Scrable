@@ -1,0 +1,19 @@
+{
+  "_comment": "Photo test with the photo adapter, and the vision model given the store's menu and the review as hints (photo_context). Compare with photo_eval_stage4 (same model and prompt, no hints). Run with --split all.",
+  "backend": "local",
+  "model": "naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-1.5B",
+  "response_adapter": "outputs/stage4_photo/adapter",
+  "image_model": "naver-hyperclovax/HyperCLOVAX-SEED-Vision-Instruct-3B",
+  "judge_backend": "anthropic",
+  "judge_model": "claude-haiku-5-5",
+  "judge_workers": 4,
+  "device": "auto",
+  "custom_data": "data/photo_reviews_v2.jsonl",
+  "documents_dir": "data/store_docs",
+  "base_prompt_file": "prompts/stage4_prompt.txt",
+  "embedding_model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+  "knowledge_size": 0,
+  "top_k": 2,
+  "output_dir": "outputs/photo_eval_context",
+  "photo_context": true
+}

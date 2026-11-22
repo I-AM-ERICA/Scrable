@@ -1,0 +1,17 @@
+{
+  "_comment": "7B experiment, condition C: Qwen2.5-VL-7B sees the customer's photo itself and writes the reply. No description model, no adapter, stage-4 prompt. --split all.",
+  "backend": "local",
+  "model": "Qwen/Qwen2.5-VL-7B-Instruct",
+  "judge_backend": "anthropic",
+  "judge_model": "claude-haiku-5-5",
+  "judge_workers": 4,
+  "device": "auto",
+  "custom_data": "data/photo_reviews_v2.jsonl",
+  "documents_dir": "data/store_docs",
+  "base_prompt_file": "prompts/stage4_prompt.txt",
+  "embedding_model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+  "knowledge_size": 0,
+  "top_k": 2,
+  "output_dir": "outputs/exp7b/photo_image",
+  "photo_input": "image"
+}

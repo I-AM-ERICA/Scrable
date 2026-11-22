@@ -1,0 +1,527 @@
+<title>리뷰 답변 블라인드 평가</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@500;600;700&family=Noto+Sans+KR:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one review at a time — sticky progress bar, review "ticket", three blind answer slips, pager. */
+:root {
+  --bg: #f3f5f4;
+  --surface: #ffffff;
+  --sunken: #e8ecea;
+  --fg: #18211e;
+  --muted: #5c6a65;
+  --line: #d3dbd8;
+  --accent: #1f6b5c;
+  --accent-soft: #d9ece6;
+  --on-accent: #ffffff;
+  --star: #b7791f;
+  --warn: #a2431f;
+  --warn-soft: #f7e2d8;
+  --font-display: "IBM Plex Sans KR", "Noto Sans KR", system-ui, sans-serif;
+  --font-body: "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121816; --surface: #1a2220; --sunken: #232d2a; --fg: #e4ebe8; --muted: #9aaaa4;
+    --line: #33403c; --accent: #5fbfa8; --accent-soft: #1f3a33; --on-accent: #0c1513;
+    --star: #e0a64a; --warn: #f08a63; --warn-soft: #3a231b; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121816; --surface: #1a2220; --sunken: #232d2a; --fg: #e4ebe8; --muted: #9aaaa4;
+  --line: #33403c; --accent: #5fbfa8; --accent-soft: #1f3a33; --on-accent: #0c1513;
+  --star: #e0a64a; --warn: #f08a63; --warn-soft: #3a231b; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 15px; line-height: 1.65; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--surface); }
+.wrap { max-width: 760px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+header.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--surface); border-bottom: 1px solid var(--line); }
+header.bar .wrap { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding-block: 10px; }
+h1 { font-family: var(--font-display); font-size: 17px; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
+.progress { flex: 1 1 160px; display: flex; align-items: center; gap: 10px; min-width: 0; }
+.track { flex: 1; height: 6px; background: var(--sunken); border-radius: 3px; overflow: hidden; }
+.fill { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+.count { font-family: var(--font-mono); font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.status { font-size: 12.5px; color: var(--muted); width: 100%; }
+.status.bad { color: var(--warn); }
+main { padding-block: 20px 48px; display: grid; gap: 20px; }
+details.guide { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px; }
+details.guide summary { cursor: pointer; font-family: var(--font-display); font-weight: 600; }
+details.guide ol, details.guide ul { margin: 8px 0 4px; padding-left: 20px; }
+.scale { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 8px 0; font-size: 14px; }
+.scale b { font-family: var(--font-mono); color: var(--accent); }
+.scale strong { font-weight: 700; }
+details.example { margin: 10px 0; border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; background: var(--sunken); }
+details.example summary { font-size: 14px; font-weight: 500; }
+.ex-review { margin: 8px 0; font-size: 14px; }
+.ex-note { color: var(--muted); font-size: 13px; }
+.ex-list { list-style: none; padding: 0 !important; margin: 0; display: grid; gap: 8px; font-size: 14px; }
+.ex-list li { display: grid; grid-template-columns: 22px 1fr; gap: 2px 8px; }
+.ex-list b { font-family: var(--font-mono); color: var(--accent); }
+.ex-list em { grid-column: 2; font-style: normal; font-size: 13px; color: var(--muted); }
+.rater { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
+.rater label { font-weight: 500; }
+input[type="text"] { font: inherit; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); min-width: 0; flex: 1 1 180px; max-width: 280px; }
+.ticket { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.ticket .head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 12px; padding: 14px 18px 0; }
+.store { font-family: var(--font-display); font-weight: 600; font-size: 15px; }
+.rid { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.stars { color: var(--star); letter-spacing: 1px; font-size: 15px; }
+.review { font-size: 17px; line-height: 1.6; padding: 8px 18px 14px; margin: 0; text-wrap: pretty; }
+.ticket details { border-top: 1px dashed var(--line); padding: 8px 18px; background: var(--sunken); }
+.ticket details summary { cursor: pointer; font-size: 13.5px; color: var(--muted); }
+.info { white-space: pre-wrap; font-size: 13.5px; line-height: 1.6; margin: 8px 0 4px; max-height: 320px; overflow: auto; }
+.slips { display: grid; gap: 14px; }
+.slip { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 18px; display: grid; gap: 10px; }
+.slip.rated { border-color: var(--accent); }
+.slip .label { font-family: var(--font-display); font-weight: 700; font-size: 13px; letter-spacing: .08em; color: var(--accent); }
+.slip p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.choices { display: flex; flex-wrap: wrap; gap: 6px; border: 0; padding: 0; margin: 0; }
+.choices legend { font-size: 13px; color: var(--muted); margin-bottom: 6px; padding: 0; }
+.choices input { position: absolute; opacity: 0; pointer-events: none; }
+.choices label { min-width: 44px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px; cursor: pointer; text-align: center; font-family: var(--font-mono); font-weight: 500; background: var(--bg); }
+.choices label small { display: block; font-family: var(--font-body); font-size: 11px; color: var(--muted); font-weight: 400; }
+.choices input:checked + label { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.choices input:checked + label small { color: var(--on-accent); }
+.choices input:focus-visible + label, button:focus-visible, summary:focus-visible, input[type="text"]:focus-visible, .flag input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.flag { display: flex; gap: 8px; align-items: flex-start; font-size: 14px; cursor: pointer; padding: 6px 10px; border-radius: 6px; }
+.flag:has(input:checked) { background: var(--warn-soft); color: var(--warn); }
+.flag input { margin-top: 5px; accent-color: var(--warn); }
+.pager { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+button { font: inherit; font-weight: 500; padding: 8px 16px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); cursor: pointer; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+button:disabled { opacity: .45; cursor: default; }
+.jump { display: grid; grid-template-columns: repeat(auto-fill, minmax(36px, 1fr)); gap: 6px; }
+.jump button { padding: 4px 0; font-family: var(--font-mono); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.jump button.done { background: var(--accent-soft); border-color: var(--accent); }
+.jump button.here { outline: 2px solid var(--fg); outline-offset: 1px; }
+.section-title { font-family: var(--font-display); font-weight: 600; font-size: 14px; margin: 0 0 8px; color: var(--muted); }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; display: grid; gap: 10px; }
+.panel p { margin: 0; font-size: 14px; color: var(--muted); }
+textarea { width: 100%; min-height: 120px; font-family: var(--font-mono); font-size: 12px; background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
+.picker { background: var(--surface); border: 1px solid var(--accent); border-radius: 10px; padding: 14px 18px; display: grid; gap: 14px; }
+.picker .choices label { min-width: 64px; font-size: 15px; }
+.picker #pick-worst input:checked + label { background: var(--warn); border-color: var(--warn); color: var(--on-accent); }
+.slip.best { border-color: var(--accent); box-shadow: inset 4px 0 0 var(--accent); }
+.slip.worst { border-color: var(--warn); box-shadow: inset 4px 0 0 var(--warn); }
+.slip .tag { font-size: 12px; font-weight: 500; margin-left: 8px; letter-spacing: 0; }
+.slip.worst .tag { color: var(--warn); }
+.finished { background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 8px; padding: 12px 16px; display: grid; gap: 2px; }
+.owner ul { margin: 0; padding-left: 18px; font-size: 14px; }
+@media (prefers-reduced-motion: reduce) { .fill { transition: none; } }
+</style>
+
+<header class="bar">
+  <div class="wrap">
+    <h1 id="page-title">리뷰 답변 블라인드 평가</h1>
+    <div class="progress"><div class="track"><div class="fill" id="fill"></div></div><span class="count" id="count">0 / 0</span></div>
+    <div class="status" id="status">저장 기능을 확인하는 중입니다…</div>
+  </div>
+</header>
+
+<div class="wrap">
+<main>
+  <details class="guide" id="guide" open>
+    <summary>평가 방법 (1분이면 읽습니다)</summary>
+    <p>배달앱 리뷰 하나에 사장님 답변 후보가 세 개(A·B·C) 있습니다. 어떤 AI가 썼는지는 숨겨 두었고, 순서도 리뷰마다 섞여 있습니다. 볼 것은 세 가지입니다.</p>
+    <ul>
+      <li>리뷰에서 손님이 말한 내용에 맞게 답했나요?</li>
+      <li>매장 정보와 맞나요? 정보에 없는 환불·보상·정책을 확정해 버리지 않았나요?</li>
+      <li>존댓말이 자연스럽고, 손님에게 실례되는 표현은 없나요?</li>
+    </ul>
+    <div data-mode="rank" hidden>
+      <p><b>리뷰마다 두 번만 고르면 됩니다: 내가 사장님이라면 ① 가장 올리고 싶은 답변, ② 가장 올리기 싫은 답변.</b></p>
+      <ul>
+        <li>매장 정보와 다른 말이나, 확인도 안 하고 환불·재배달을 약속한 답변은 “가장 별로” 쪽으로 보세요.</li>
+        <li>길이는 따지지 마세요. 짧아도 할 말을 다 했으면 좋은 답변입니다.</li>
+        <li>둘이 비슷해 보여도 조금이라도 나은 쪽을 골라 주세요. 오래 고민하지 않아도 됩니다.</li>
+      </ul>
+      <p>모두 {N}개 리뷰, 5~10분 걸립니다. 다른 사람과 상의하지 말고 혼자 골라 주세요. 끝나면 맨 아래 <b>“내 결과 복사”</b>를 눌러, 부탁한 사람에게 메시지로 붙여 넣어 보내 주세요.</p>
+    </div>
+    <div data-mode="score">
+    <p><b>한 가지 질문으로 정하세요: “내가 사장님이라면, 이걸 올리기 전에 얼마나 고쳐야 하나?”</b></p>
+    <div class="scale">
+      <b>5</b><span><strong>고칠 곳 없음.</strong> 손님이 말한 내용을 짚어 주고, 필요한 안내는 매장 정보대로 하며, 말투도 자연스럽다.</span>
+      <b>4</b><span><strong>한 군데만 다듬으면 됨.</strong> 틀린 말은 없다. 어색한 표현 하나, 조금 밋밋한 정도.</span>
+      <b>3</b><span><strong>틀린 말은 없지만 여러 군데 손봐야 함.</strong> 어느 가게 어느 리뷰에나 붙일 수 있는 뻔한 답, 또는 손님이 물은 것에 답을 빠뜨림.</span>
+      <b>2</b><span><strong>거의 새로 써야 함.</strong> 리뷰를 잘못 이해했거나, 매장 정보와 다른 말을 하거나, 확인도 안 하고 환불·재배달을 약속함.</span>
+      <b>1</b><span><strong>올리면 가게에 손해.</strong> 칭찬에 사과하는 등 리뷰와 반대로 답함, 손님 탓을 함, 무례함, 말이 안 되는 문장.</span>
+    </div>
+    <p>규칙:</p>
+    <ul>
+      <li>매장 정보와 다른 말이나 근거 없는 약속이 하나라도 있으면 아래 칸을 체크하고 <b>2점 이하</b>로 주세요.</li>
+      <li>리뷰의 <b>핵심</b>을 잘못 읽었으면(불만을 칭찬으로, 요청을 반대로) <b>2점 이하</b>입니다.</li>
+      <li>핵심은 맞게 읽었는데 <b>말 한 군데를 잘못 알아들었으면</b> <b>3점</b>입니다. 예: “튀김 서비스(덤) 감사해요”에 “튀김 서비스를 이용해 주셔서 감사합니다”. 고칠 곳은 하나지만 뜻이 틀렸으니 4점은 아닙니다. 매장 정보와 다른 말은 아니므로 체크하지 않습니다.</li>
+      <li>두 점수 사이에서 고민되면 <b>낮은 쪽</b>을 고르세요.</li>
+      <li>길이는 점수에 넣지 마세요. 짧아도 할 말을 다 했으면 5점입니다.</li>
+    </ul>
+    <details class="example">
+      <summary>예시로 감 잡기 (평가 대상이 아닌 가상 리뷰)</summary>
+      <p class="ex-review">리뷰(별 2개): “짬뽕이 다 불어서 왔어요. 배달이 40분이나 걸렸네요.”<br><span class="ex-note">매장 정보: 배달 문제는 매장 전화로 알려 주시면 확인 후 다시 보내 드리거나 환불을 안내합니다.</span></p>
+      <ol class="ex-list">
+        <li><b>5</b> 늦은 배달로 짬뽕이 불어서 도착해 정말 죄송합니다. 주문하신 날짜와 시간을 매장 전화로 알려 주시면 확인 후 다시 보내 드리거나 환불을 안내해 드리겠습니다. 배달 시간도 더 신경 쓰겠습니다.<em>문제 두 가지(불음, 40분)를 다 짚고, 매장 정보대로 안내함.</em></li>
+        <li><b>4</b> 짬뽕이 불어서 도착해 죄송합니다. 매장 전화로 알려 주시면 확인 후 재배달이나 환불을 안내해 드리겠습니다.<em>틀린 곳은 없지만 늦은 배달 언급이 빠짐.</em></li>
+        <li><b>3</b> 소중한 리뷰 감사합니다. 불편을 드려 죄송합니다. 앞으로 더 노력하는 가게가 되겠습니다.<em>틀린 말은 없지만 어느 리뷰에나 쓸 수 있고, 어떻게 해결하는지 안내가 없음.</em></li>
+        <li><b>2</b> 짬뽕이 불어서 죄송합니다. 바로 환불해 드렸으니 확인 부탁드립니다.<em>확인도 안 하고 환불을 끝냈다고 함 → 체크.</em></li>
+        <li><b>1</b> 맛있게 드셨다니 기쁩니다! 다음에도 짬뽕 시켜 주세요.<em>불만 리뷰를 칭찬으로 잘못 읽음.</em></li>
+      </ol>
+    </details>
+    <p>다른 사람과 상의하지 말고 혼자 평가해 주세요.</p>
+    </div>
+    <div class="rater">
+      <label for="rater-name">평가자 이름(별명도 됨)</label>
+      <input type="text" id="rater-name" autocomplete="off" placeholder="예: 홍길동">
+    </div>
+  </details>
+
+  <section class="ticket" id="ticket" aria-live="polite">
+    <div class="head">
+      <span class="store" id="store"></span>
+      <span class="rid" id="rid"></span>
+    </div>
+    <p class="review" id="review"></p>
+    <details id="info-box">
+      <summary>매장 정보 보기 (AI도 이 정보를 보고 답했습니다)</summary>
+      <div class="info" id="info"></div>
+    </details>
+  </section>
+
+  <div class="slips" id="slips"></div>
+
+  <section class="picker" id="picker" hidden>
+    <fieldset class="choices" id="pick-best"><legend>가장 올리고 싶은 답변</legend></fieldset>
+    <fieldset class="choices" id="pick-worst"><legend>가장 올리기 싫은 답변</legend></fieldset>
+  </section>
+
+  <div class="finished" id="finished" hidden>
+    <b>모두 끝났습니다. 고맙습니다!</b>
+    <span>아래 “내 결과 복사”를 눌러, 부탁한 사람에게 메시지로 붙여 넣어 보내 주세요.</span>
+  </div>
+
+  <div class="pager">
+    <button type="button" id="prev">← 이전</button>
+    <button type="button" id="next-todo">다음 미완료로</button>
+    <button type="button" class="primary" id="next">다음 →</button>
+  </div>
+
+  <section>
+    <h2 class="section-title">리뷰 바로가기</h2>
+    <div class="jump" id="jump"></div>
+  </section>
+
+  <section class="panel">
+    <h2 class="section-title" style="margin:0">결과 보내기</h2>
+    <p id="send-hint">점수는 자동으로 저장됩니다. 자동 저장이 꺼져 있다는 안내가 보이면, 다 끝낸 뒤 아래 버튼으로 결과를 복사해 담당자에게 메시지로 보내 주세요.</p>
+    <div><button type="button" id="copy">내 결과 복사</button></div>
+    <textarea id="export" readonly hidden aria-label="복사할 결과"></textarea>
+  </section>
+
+  <section class="panel owner" id="owner" hidden>
+    <h2 class="section-title" style="margin:0">제출 현황 (소유자에게만 보임)</h2>
+    <ul id="owner-list"></ul>
+  </section>
+</main>
+</div>
+
+<script type="application/json" id="data">/*__DATA__*/{}</script>
+<script>
+(function () {
+  "use strict";
+  var DATA = JSON.parse(document.getElementById("data").textContent || "{}");
+  var ITEMS = DATA.items || [];
+  var STORES = DATA.stores || {};
+  var MODE = DATA.mode === "rank" ? "rank" : "score";
+  var LS_KEY = MODE === "rank" ? "scrable-human-eval-v1-rank" : "scrable-human-eval-v1";
+  var LABELS = { 1: "가게에 손해", 2: "새로 써야", 3: "여러 곳 손봄", 4: "한 곳 다듬기", 5: "그대로" };
+  var state = { rater: "", items: {}, updated: "" };
+  var idx = 0;
+  var ref = null, writing = false, dirty = false, timer = null;
+
+  function $(id) { return document.getElementById(id); }
+  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+
+  function loadLocal() {
+    try {
+      var s = JSON.parse(localStorage.getItem(LS_KEY) || "null");
+      if (s && s.items) { state = { rater: s.rater || "", items: s.items, updated: s.updated || "" }; }
+      var i = parseInt(localStorage.getItem(LS_KEY + ":idx") || "0", 10);
+      if (i >= 0 && i < ITEMS.length) idx = i;
+    } catch (e) {}
+  }
+  function saveLocal() {
+    try { localStorage.setItem(LS_KEY, JSON.stringify(state)); localStorage.setItem(LS_KEY + ":idx", String(idx)); } catch (e) {}
+  }
+  function setStatus(text, bad) { var s = $("status"); s.textContent = text; s.classList.toggle("bad", !!bad); }
+
+  function isDoneFor(r, item) {
+    if (!r) return false;
+    if (MODE === "rank") return !!r.best && !!r.worst && r.best !== r.worst;
+    return item.answers.every(function (a) { return r[a.slot] && typeof r[a.slot].score === "number"; });
+  }
+  function isDone(item) { return isDoneFor(state.items[item.id], item); }
+  function doneCount() { return ITEMS.filter(isDone).length; }
+
+  function payload() {
+    return { version: 1, rater: state.rater, updated: state.updated, items: JSON.parse(JSON.stringify(state.items)) };
+  }
+
+  function changed() {
+    state.updated = new Date().toISOString();
+    saveLocal();
+    renderProgress();
+    if (!ref) return;
+    dirty = true;
+    setStatus("저장 중…");
+    clearTimeout(timer);
+    timer = setTimeout(flush, 700);
+  }
+  function flush() {
+    if (writing || !dirty || !ref) return;
+    writing = true; dirty = false;
+    ref.set(payload()).then(function () {
+      setStatus("자동 저장됨 · 언제 닫아도 이어서 할 수 있습니다");
+    }, function (e) {
+      if (e && (e.code === "invalid_argument" || e.code === "revoked" || e.code === "not_granted")) {
+        ref = null;
+        setStatus("이 계정은 자동 저장 권한이 없습니다. 이 브라우저에는 저장되니, 끝나면 '내 결과 복사'로 보내 주세요.", true);
+      } else {
+        dirty = true;
+        setStatus("저장하지 못했습니다. 다음 점수를 고를 때 다시 저장합니다.", true);
+      }
+    }).then(function () { writing = false; if (dirty && ref) { clearTimeout(timer); timer = setTimeout(flush, 1500); } });
+  }
+
+  function renderProgress() {
+    var n = doneCount();
+    $("count").textContent = n + " / " + ITEMS.length;
+    $("fill").style.width = (ITEMS.length ? (100 * n / ITEMS.length) : 0) + "%";
+    var buttons = $("jump").children;
+    for (var i = 0; i < buttons.length; i++) {
+      buttons[i].classList.toggle("done", isDone(ITEMS[i]));
+      buttons[i].classList.toggle("here", i === idx);
+      buttons[i].setAttribute("aria-current", i === idx ? "true" : "false");
+    }
+    $("prev").disabled = idx === 0;
+    $("next").disabled = idx >= ITEMS.length - 1;
+    $("next-todo").disabled = n === ITEMS.length;
+    $("finished").hidden = !(ITEMS.length && n === ITEMS.length);
+  }
+
+  function renderPicker(item, slipsBySlot) {
+    var r = state.items[item.id] || {};
+    [["best", "pick-best", "가장 좋음"], ["worst", "pick-worst", "가장 별로"]].forEach(function (spec) {
+      var field = spec[0], box = $(spec[1]);
+      var legend = box.querySelector("legend");
+      box.textContent = "";
+      box.appendChild(legend);
+      item.answers.forEach(function (a) {
+        var id = spec[1] + "-" + a.slot;
+        var input = el("input");
+        input.type = "radio"; input.name = spec[1]; input.id = id; input.value = a.slot;
+        input.checked = r[field] === a.slot;
+        input.addEventListener("change", function () {
+          var cur = state.items[item.id] || (state.items[item.id] = {});
+          cur[field] = a.slot;
+          var other = field === "best" ? "worst" : "best";
+          if (cur[other] === a.slot) delete cur[other];
+          changed();
+          renderPicker(item, slipsBySlot);
+        });
+        var label = el("label", null, a.slot);
+        label.htmlFor = id;
+        box.appendChild(input); box.appendChild(label);
+      });
+    });
+    item.answers.forEach(function (a) {
+      var slip = slipsBySlot[a.slot];
+      var tag = slip.querySelector(".tag");
+      slip.classList.toggle("best", r.best === a.slot);
+      slip.classList.toggle("worst", r.worst === a.slot);
+      tag.textContent = r.best === a.slot ? "가장 좋음" : r.worst === a.slot ? "가장 별로" : "";
+    });
+  }
+
+  function renderItem() {
+    var item = ITEMS[idx];
+    if (!item) { $("review").textContent = "평가할 리뷰가 없습니다."; return; }
+    var store = STORES[item.app_id] || { name: item.app_id, info: "" };
+    $("store").textContent = store.name + (item.rating ? "  " : "");
+    if (item.rating) {
+      var st = el("span", "stars", "★".repeat(item.rating) + "☆".repeat(5 - item.rating));
+      st.setAttribute("aria-label", "별점 " + item.rating + "점");
+      $("store").appendChild(st);
+    }
+    $("rid").textContent = (idx + 1) + "번 · " + item.id;
+    $("review").textContent = item.review;
+    $("info").textContent = store.info || "매장 정보 없음";
+    var slips = $("slips");
+    slips.textContent = "";
+    var r = state.items[item.id] || {};
+    if (MODE === "rank") {
+      var bySlot = {};
+      item.answers.forEach(function (a) {
+        var slip = el("article", "slip");
+        var label = el("div", "label", "답변 " + a.slot);
+        label.appendChild(el("span", "tag", ""));
+        slip.appendChild(label);
+        slip.appendChild(el("p", null, a.text));
+        slips.appendChild(slip);
+        bySlot[a.slot] = slip;
+      });
+      renderPicker(item, bySlot);
+      $("info-box").open = false;
+      renderProgress();
+      return;
+    }
+    item.answers.forEach(function (a) {
+      var cur = r[a.slot] || {};
+      var slip = el("article", "slip" + (typeof cur.score === "number" ? " rated" : ""));
+      slip.appendChild(el("div", "label", "답변 " + a.slot));
+      slip.appendChild(el("p", null, a.text));
+      var fs = el("fieldset", "choices");
+      fs.appendChild(el("legend", null, "답변 " + a.slot + " 점수"));
+      [1, 2, 3, 4, 5].forEach(function (n) {
+        var id = "s-" + a.slot + "-" + n;
+        var input = el("input");
+        input.type = "radio"; input.name = "score-" + a.slot; input.id = id; input.value = String(n);
+        input.checked = cur.score === n;
+        input.addEventListener("change", function () { setAnswer(item.id, a.slot, { score: n }); slip.classList.add("rated"); });
+        var label = el("label", null, String(n));
+        label.htmlFor = id;
+        label.appendChild(el("small", null, LABELS[n]));
+        fs.appendChild(input); fs.appendChild(label);
+      });
+      slip.appendChild(fs);
+      var flag = el("label", "flag");
+      var cb = el("input");
+      cb.type = "checkbox"; cb.id = "f-" + a.slot; cb.checked = !!cur.flag;
+      cb.addEventListener("change", function () { setAnswer(item.id, a.slot, { flag: cb.checked }); });
+      flag.appendChild(cb);
+      flag.appendChild(el("span", null, "매장 정보와 다르거나, 확인 전에 환불·보상 등을 약속함"));
+      slip.appendChild(flag);
+      slips.appendChild(slip);
+    });
+    $("info-box").open = false;
+    renderProgress();
+  }
+
+  function setAnswer(id, slot, patch) {
+    var r = state.items[id] || (state.items[id] = {});
+    var a = r[slot] || (r[slot] = {});
+    Object.keys(patch).forEach(function (k) { a[k] = patch[k]; });
+    changed();
+  }
+
+  function go(i) {
+    if (i < 0 || i >= ITEMS.length) return;
+    idx = i; saveLocal(); renderItem();
+    $("ticket").scrollIntoView({ block: "start", behavior: "auto" });
+  }
+
+  function buildJump() {
+    var box = $("jump");
+    ITEMS.forEach(function (item, i) {
+      var b = el("button", null, String(i + 1));
+      b.type = "button";
+      b.setAttribute("aria-label", (i + 1) + "번 리뷰로 이동");
+      b.addEventListener("click", function () { go(i); });
+      box.appendChild(b);
+    });
+  }
+
+  $("prev").addEventListener("click", function () { go(idx - 1); });
+  $("next").addEventListener("click", function () { go(idx + 1); });
+  $("next-todo").addEventListener("click", function () {
+    for (var k = 1; k <= ITEMS.length; k++) { var j = (idx + k) % ITEMS.length; if (!isDone(ITEMS[j])) { go(j); return; } }
+  });
+  var nameTimer = null;
+  $("rater-name").addEventListener("input", function (e) {
+    var v = e.target.value.slice(0, 40);
+    clearTimeout(nameTimer);
+    nameTimer = setTimeout(function () { state.rater = v; changed(); }, 600);
+  });
+  $("copy").addEventListener("click", function () {
+    var text = JSON.stringify(payload());
+    var box = $("export");
+    box.value = text; box.hidden = false;
+    var done = function () { $("copy").textContent = "복사됨 (" + doneCount() + "/" + ITEMS.length + "개 완료)"; };
+    try {
+      navigator.clipboard.writeText(text).then(done, function () { box.focus(); box.select(); $("copy").textContent = "아래 글을 길게 눌러 전체 복사해 주세요"; });
+    } catch (e) { box.focus(); box.select(); }
+  });
+
+  function ownerPanel(db) {
+    var panel = $("owner");
+    panel.hidden = false;
+    var list = $("owner-list");
+    list.appendChild(el("li", null, "불러오는 중…"));
+    db.collection("ratings").onSnapshot(function (snap) {
+      list.textContent = "";
+      if (snap.empty) { list.appendChild(el("li", null, "아직 제출이 없습니다.")); return; }
+      snap.docs.forEach(function (d) {
+        var body = d.data() || {};
+        var items = body.items || {};
+        var n = ITEMS.filter(function (item) { return isDoneFor(items[item.id], item); }).length;
+        list.appendChild(el("li", null, (body.rater || "이름 없음") + ": " + n + " / " + ITEMS.length));
+      });
+    }, function () { list.textContent = ""; list.appendChild(el("li", null, "제출 현황을 불러오지 못했습니다.")); });
+  }
+
+  function noSync(reason) {
+    if (MODE === "rank") { setStatus("고른 내용은 이 브라우저에 저장됩니다. 끝나면 맨 아래 '내 결과 복사'로 보내 주세요."); return; }
+    setStatus(reason + " 점수는 이 브라우저에만 저장됩니다. 끝나면 '내 결과 복사'로 보내 주세요.", true);
+  }
+
+  async function connect() {
+    if (!window.claude || typeof window.claude.use !== "function") { noSync("자동 저장을 쓸 수 없는 화면입니다."); return; }
+    var pair;
+    try { pair = await Promise.all([window.claude.use("db"), window.claude.use("user")]); } catch (e) { pair = [null, null]; }
+    var db = pair[0], user = pair[1];
+    if (!db || !user) { noSync("로그인하지 않았거나 자동 저장을 쓸 수 없습니다."); return; }
+    var id = await user.id();
+    if (!id) { noSync("로그인 정보가 없어 자동 저장을 쓸 수 없습니다."); return; }
+    var docRef = db.doc("ratings/" + id);
+    var slow = setTimeout(function () { setStatus("저장소에 아직 연결되지 않았습니다. 점수는 이 브라우저에 먼저 저장됩니다.", true); }, 10000);
+    try {
+      var snap = await docRef.get();
+      clearTimeout(slow);
+      if (snap.exists) {
+        var r = snap.data() || {};
+        if (!state.updated || (r.updated && r.updated > state.updated)) {
+          state = { rater: r.rater || "", items: JSON.parse(JSON.stringify(r.items || {})), updated: r.updated || "" };
+          saveLocal();
+          $("rater-name").value = state.rater;
+          renderItem();
+        }
+      }
+      ref = docRef;
+      if (state.updated && (!snap.exists || (snap.data() || {}).updated !== state.updated)) { dirty = true; flush(); }
+      else setStatus("자동 저장 켜짐 · 언제 닫아도 이어서 할 수 있습니다");
+    } catch (e) {
+      clearTimeout(slow);
+      noSync("저장소에 연결하지 못했습니다.");
+      return;
+    }
+    try { if (await user.isOwner()) ownerPanel(db); } catch (e) {}
+  }
+
+  document.querySelectorAll("[data-mode]").forEach(function (node) { node.hidden = node.getAttribute("data-mode") !== MODE; });
+  document.querySelectorAll("[data-mode] p").forEach(function (p) {
+    if (p.textContent.indexOf("{N}") >= 0) p.innerHTML = p.innerHTML.replace("{N}", String(ITEMS.length));
+  });
+  if (MODE === "rank") {
+    $("page-title").textContent = "리뷰 답변 고르기";
+    $("picker").hidden = false;
+    $("send-hint").textContent = "다 끝나면 아래 버튼을 눌러 결과를 복사하고, 부탁한 사람에게 메시지로 붙여 넣어 보내 주세요. 이 브라우저에도 저장되니 중간에 닫았다 열어도 이어서 할 수 있습니다.";
+  }
+  loadLocal();
+  $("rater-name").value = state.rater;
+  if (doneCount() > 0) $("guide").open = false;
+  buildJump();
+  renderItem();
+  connect();
+})();
+</script>

@@ -1,0 +1,23 @@
+{
+  "backend": "local",
+  "model": "naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-1.5B",
+  "judge_backend": "anthropic",
+  "judge_model": "claude-haiku-5-5",
+  "prompt_backend": "anthropic",
+  "prompt_model": "claude-haiku-5-5",
+  "compare_models": [{"backend": "anthropic", "model": "claude-haiku-5-5"}],
+  "judge_workers": 4,
+  "device": "auto",
+  "custom_data": "examples/store_reviews.sample.jsonl",
+  "documents_dir": "examples/store_docs",
+  "base_prompt_file": "prompts/store_base_prompt.txt",
+  "embedding_model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+  "train_size": 3,
+  "validation_size": 1,
+  "test_size": 2,
+  "knowledge_size": 0,
+  "max_iterations": 1,
+  "threshold": 0.95,
+  "top_k": 2,
+  "output_dir": "outputs/stage1_smoke"
+}

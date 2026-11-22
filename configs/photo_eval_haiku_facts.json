@@ -1,0 +1,16 @@
+{
+  "_comment": "Photo-facts experiment, optional: Claude Haiku writes the reply from the person-checked photo facts (outputs/photo_facts/descriptions.json). With photo_eval_haiku (Haiku + Vision-3B descriptions) it shows how much better facts help a strong reply model. Haiku also judges, so it may score a little high. --split all.",
+  "backend": "anthropic",
+  "model": "claude-haiku-5-5",
+  "judge_backend": "anthropic",
+  "judge_model": "claude-haiku-5-5",
+  "judge_workers": 4,
+  "custom_data": "data/photo_reviews_v2.jsonl",
+  "documents_dir": "data/store_docs",
+  "base_prompt_file": "prompts/stage4_prompt.txt",
+  "embedding_model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+  "knowledge_size": 0,
+  "top_k": 2,
+  "output_dir": "outputs/photo_eval_haiku_facts",
+  "photo_descriptions_from": "outputs/photo_facts/descriptions.json"
+}
