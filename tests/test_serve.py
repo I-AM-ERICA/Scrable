@@ -71,6 +71,47 @@ def test_engine_uses_store_documents_alias_or_store_context():
     assert llm.messages[-1][0]["content"].startswith("기본 프롬프트\n- 답글 말투: 친근하게")
 
 
+class FakeDescriber:
+    """Test-only vision model: records (photo, menu) for each description."""
+
+    def __init__(self, fail=False):
+        self.calls, self.fail = [], fail
+
+    def describe(self, path, menu=None):
+        self.calls.append((path, menu))
+        if self.fail:
+            raise ValueError("unreadable photo")
+        return "떡볶이 한 접시가 보입니다"
+
+
+def test_engine_describes_photo_with_store_menu_when_photo_context_is_on():
+    llm, describer = FakeLLM(), FakeDescriber()
+    docs = [Document("d1", "단무지는 1개 기본 제공", "bunsik-01", "info.md")]
+    menus = {"bunsik-01": "떡볶이, 김밥"}
+    on = ReplyEngine(
+        ServeConfig(base={**BASE, "photo_context": True}, store_aliases={"7": "bunsik-01"}),
+        llm, FakeRetriever(docs), "p", describer, menus,
+    )
+    on.draft({"store_id": "7"}, "이거 보세요", 2, image="photo.jpg")
+    assert describer.calls == [("photo.jpg", "떡볶이, 김밥")]  # menu of the aliased documents folder
+    payload = json.loads(llm.messages[-1][1]["content"])
+    assert payload["photo_description"] == "떡볶이 한 접시가 보입니다"
+    on.draft({"store_id": "99", "name": "새가게"}, "이거 보세요", 2, image="photo.jpg")
+    assert describer.calls[-1] == ("photo.jpg", None)  # store without documents: no menu
+    on.draft({"store_id": "7"}, "맛있어요", 5)  # no photo: no description, training-time input
+    assert len(describer.calls) == 2 and "photo_description" not in json.loads(llm.messages[-1][1]["content"])
+    off = ReplyEngine(ServeConfig(base=BASE), llm, FakeRetriever(docs), "p", describer, menus)
+    off.draft({"store_id": "bunsik-01"}, "이거 보세요", 2, image="photo.jpg")
+    assert describer.calls[-1] == ("photo.jpg", None)  # photo_context off: photo only
+
+
+def test_engine_replies_without_photo_when_description_fails():
+    llm = FakeLLM()
+    eng = ReplyEngine(ServeConfig(base=BASE), llm, FakeRetriever([]), "p", FakeDescriber(fail=True))
+    assert eng.draft({"store_id": "x", "name": "새가게"}, "이거 보세요", 1, image="photo.jpg")["reply"]
+    assert "photo_description" not in json.loads(llm.messages[-1][1]["content"])
+
+
 def test_engine_refuses_when_too_many_calls_wait():
     gate = threading.Event()
     eng = engine(FakeLLM(gate), max_waiting=1)

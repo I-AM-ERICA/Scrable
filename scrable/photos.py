@@ -134,11 +134,12 @@ def image_block(path):
 
 
 class PhotoDescriber:
-    """Cached photo -> Korean description with a vision model (anything with describe_image)."""
+    """Cached photo -> Korean description with a vision model (anything with describe_image).
+    directory=None: no disk cache (the gRPC server must not keep customer photo descriptions)."""
 
     def __init__(self, vision_llm, directory, prompt=DESCRIBE_PROMPT, max_tokens=128):
         self.vision = vision_llm
-        self.directory = Path(directory)
+        self.directory = Path(directory) if directory is not None else None
         self.prompt = prompt
         self.max_tokens = max_tokens
         self.calls = 0
@@ -159,19 +160,25 @@ class PhotoDescriber:
             prompt = context_prompt(review, menu)
         else:
             prompt = self.prompt
-        cache = self.directory / f"{self.key(path, prompt)}.json"
-        if cache.exists():
-            return json.loads(cache.read_text(encoding="utf-8"))["text"]
+        if self.directory is None:
+            check_image(path)
+            cache = None
+        else:
+            cache = self.directory / f"{self.key(path, prompt)}.json"
+            if cache.exists():
+                return json.loads(cache.read_text(encoding="utf-8"))["text"]
         text = self.vision.describe_image(path, prompt, self.max_tokens).strip()
         if not text:
             raise ValueError(f"Empty photo description for {path}")
         self.calls += 1
-        write_json(cache, {"text": text, "image": str(path)})
+        if cache is not None:
+            write_json(cache, {"text": text, "image": str(path)})
         return text
 
 
-def build_describer(config):
-    """PhotoDescriber for Config.image_model, or None when photos are not described."""
+def build_describer(config, cache=True):
+    """PhotoDescriber for Config.image_model, or None when photos are not described.
+    cache=False: describe every photo again and write nothing to disk (gRPC server)."""
     if not config.image_model:
         return None
     from .llm import ImageTextLLM, is_vision, make_backend
@@ -180,4 +187,4 @@ def build_describer(config):
         vision = make_backend("local", config.image_model, config)
     else:  # Any other pretrained image-text-to-text model, e.g. Qwen/Qwen2.5-VL-7B-Instruct
         vision = ImageTextLLM(config.image_model, config.device, config.seed)
-    return PhotoDescriber(vision, Path(config.output_dir) / "photo_cache")
+    return PhotoDescriber(vision, Path(config.output_dir) / "photo_cache" if cache else None)

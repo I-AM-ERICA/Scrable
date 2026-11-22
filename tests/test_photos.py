@@ -93,6 +93,17 @@ def test_photo_descriptions_are_cached_by_image_content(tmp_path):
         image_block(tmp_path / "a.gif")
 
 
+def test_photo_describer_without_cache_writes_nothing(tmp_path):
+    vision = FakeVision()
+    describer = PhotoDescriber(vision, None)  # gRPC server: customer photos leave no trace on disk
+    image = photo(tmp_path)
+    assert describer.describe(image) == describer.describe(image)
+    assert len(vision.calls) == 2 and describer.calls == 2
+    assert [p.name for p in tmp_path.iterdir()] == [image.name]
+    with pytest.raises(ValueError, match="Unsupported image type"):
+        describer.describe(tmp_path / "a.gif")
+
+
 def test_photo_review_evaluation_describes_photo_and_shows_it_to_judge(tmp_path):
     image = photo(tmp_path)
     data = tmp_path / "photo_reviews.jsonl"

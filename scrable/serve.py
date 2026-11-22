@@ -14,6 +14,13 @@ documents gets one short document built from StoreContext, so replies stay gener
 sentiment comes from the star rating (same rule as the backend's mock), keywords from a fixed list
 of review topics. Replies are generated one at a time on the GPU; past max_waiting queued calls the
 server answers RESOURCE_EXHAUSTED (the backend shows "AI가 혼잡합니다").
+
+Photos: ReplyEngine.draft takes an optional photo path. With base.image_model set, the vision model
+describes the photo and the reply model gets that description, as in the photo experiments. With
+base.photo_context also true, the vision model gets the store's menu (from its documents) as a
+reference, which named dishes right far more often (RESEARCH_LOG, 음식 이름). Descriptions are
+not cached on disk. customer.proto has no photo field yet, so DraftReply never sends a photo:
+once the backend adds one, save it to a temporary file and pass its path as image.
 """
 
 import argparse
@@ -117,8 +124,10 @@ class Busy(Exception):
 class ReplyEngine:
     """Store lookup, retrieval and generation. One generation at a time: one model on one GPU."""
 
-    def __init__(self, scfg, llm, retriever, prompt):
+    def __init__(self, scfg, llm, retriever, prompt, describer=None, menus=None):
         self.scfg, self.llm, self.retriever, self.prompt = scfg, llm, retriever, prompt
+        self.describer = describer  # PhotoDescriber without disk cache, or None (photos ignored)
+        self.menus = menus or {}  # documents folder -> menu line, used when base.photo_context
         self._gpu = threading.Lock()
         self._slots = threading.BoundedSemaphore(scfg.max_waiting)
 
@@ -133,8 +142,21 @@ class ReplyEngine:
             else []
         )
 
-    def draft(self, store, review_text, rating, tone=""):
-        """{'reply', 'sentiment', 'keywords'} for one review. store = StoreContext fields as a dict."""
+    def describe(self, image, store_key):
+        """Photo description for the reply model, or None (no photo, no vision model, or it failed:
+        a reply without the photo is better than no reply). Call while holding the GPU lock."""
+        if not image or self.describer is None:
+            return None
+        menu = self.menus.get(store_key) if self.scfg.config.photo_context else None
+        try:
+            return self.describer.describe(image, menu=menu)
+        except Exception as error:  # Log the type only: never photo contents or paths.
+            log.warning("Photo description failed (%s); replying without it", type(error).__name__)
+            return None
+
+    def draft(self, store, review_text, rating, tone="", image=None):
+        """{'reply', 'sentiment', 'keywords'} for one review. store = StoreContext fields as a dict;
+        image = path to the customer's photo, or None."""
         if not self._slots.acquire(blocking=False):
             raise Busy
         try:
@@ -149,8 +171,10 @@ class ReplyEngine:
             prompt = self.prompt
             if tone.strip():
                 prompt += f"\n- 답글 말투: {tone.strip()[:MAX_TONE_CHARS]}"
-            messages = generation_messages(prompt, review, self.chunks(store_key, review_text, store))
+            chunks = self.chunks(store_key, review_text, store)
             with self._gpu:
+                description = self.describe(image, store_key)
+                messages = generation_messages(prompt, review, chunks, photo_description=description)
                 reply = self.llm.complete(messages, max_tokens=self.scfg.config.response_tokens).strip()
             if not reply:
                 raise RuntimeError("empty reply")
@@ -247,6 +271,7 @@ def load_engine(scfg):
     from .data import load_documents
     from .experiment import load_base_prompt
     from .llm import make_backend
+    from .photos import build_describer, store_menus
     from .rag import build_retriever
 
     config = scfg.config
@@ -254,7 +279,9 @@ def load_engine(scfg):
     retriever = build_retriever(config, documents)
     # No CachedLLM: the server must not write customer reviews to a disk cache.
     llm = make_backend("local", config.model, config, config.response_adapter)
-    return ReplyEngine(scfg, llm, retriever, load_base_prompt(config))
+    describer = build_describer(config, cache=False)  # None unless base.image_model is set
+    menus = store_menus(documents) if config.photo_context else {}
+    return ReplyEngine(scfg, llm, retriever, load_base_prompt(config), describer, menus)
 
 
 def main():

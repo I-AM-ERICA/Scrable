@@ -262,7 +262,7 @@ Haiku와의 차이가 주로 구체성이라, 1.5B 답글을 여러 개 만들�
 - [ ] 새 어댑터(`outputs/stage4_photo/adapter`)를 드라이브에 올리고 레포 `configs/serve.json`도 바꾸기
 - [x] 답글 여러 개 중 고르기의 상한 보기: 상한 +0.10~0.13이지만 대부분 샘플링 손해를 되찾는 정도이고 구체성은 거의 그대로. 점수 예측 모델은 만들지 않고 멈춤
 - [ ] (선택) 사람 평가 다시 하기 (구글 폼, `scripts/human_eval.py form`)
-- [ ] 사진 답글을 서비스에 붙이려면 백엔드 담당자와 gRPC 규약에 사진 칸 추가. 이때 사진 설명은 Vision-3B + 메뉴 참고(`photo_context: true`)로 켜기. 지금은 가게 메뉴를 평가 코드(`evaluate.py`)에서만 넘기므로, 서비스 쪽에서도 가게 메뉴를 넘기도록 고쳐야 함
+- [ ] 사진 답글을 서비스에 붙이려면 백엔드 담당자와 gRPC 규약에 사진 칸 추가. 이때 사진 설명은 Vision-3B + 메뉴 참고로 켜기: `configs/serve.json`의 base에 `"image_model": "naver-hyperclovax/HyperCLOVAX-SEED-Vision-Instruct-3B"`, `"photo_context": true`를 넣고, 서버(`scrable/serve.py`)에서 받은 사진을 임시 파일로 저장해 `draft(..., image=경로)`로 넘기기. 서비스 쪽 사진 설명과 가게 메뉴 넘기기는 준비됨(사진 설명은 디스크에 남기지 않음)
 
 ### 사이트에서 확인
 
