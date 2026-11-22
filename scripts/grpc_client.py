@@ -29,6 +29,7 @@ def main():
     parser.add_argument("--category", default="분식")
     parser.add_argument("--rating", type=int, default=2)
     parser.add_argument("--tone", default="")
+    parser.add_argument("--store-info", default="", help="Store info the owner wrote (menu, hours, delivery notes)")
     parser.add_argument(
         "--review", default="떡볶이는 맛있었는데 배달이 한 시간 넘게 걸려서 다 식어서 왔어요."
     )
@@ -53,6 +54,7 @@ def main():
             review_text=args.review,
             rating=args.rating,
             tone=args.tone,
+            store_info=args.store_info,
         )
         start = time.perf_counter()
         result = pb_grpc.CustomerAssistantStub(channel).DraftReply(

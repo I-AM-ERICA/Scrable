@@ -1,0 +1,18 @@
+{
+  "_comment": "Photo test with the more natural prompt (prompts/stage4_natural_prompt.txt): same photo adapter and exactly the same Vision-3B descriptions as outputs/photo_eval_stage4, so only the prompt changes. Run with --split all and --reference outputs/photo_eval_stage4/all_predictions.json.",
+  "backend": "local",
+  "model": "naver-hyperclovax/HyperCLOVAX-SEED-Text-Instruct-1.5B",
+  "response_adapter": "outputs/stage4_photo/adapter",
+  "judge_backend": "anthropic",
+  "judge_model": "claude-haiku-5-5",
+  "judge_workers": 4,
+  "device": "auto",
+  "custom_data": "data/photo_reviews_v2.jsonl",
+  "documents_dir": "data/store_docs",
+  "base_prompt_file": "prompts/stage4_natural_prompt.txt",
+  "embedding_model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+  "knowledge_size": 0,
+  "top_k": 2,
+  "output_dir": "outputs/photo_eval_natural",
+  "photo_descriptions_from": "outputs/photo_eval_stage4/all_predictions.json"
+}

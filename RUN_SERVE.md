@@ -7,12 +7,14 @@
 | 코드 | `scrable/serve.py`, 설정 `configs/serve.json` |
 | 약속서(proto) | `scrable/proto/america/ai/v1/*.proto` (백엔드 레포에서 그대로 복사) |
 | 받는 것 | 가게 정보(`store`), 리뷰(`review_text`), 별점(`rating`, 모르면 0), 말투(`tone`) |
+| 별점이 없을 때 | 사이트는 별점을 안 보냅니다. 학습 입력에는 늘 별점이 있었으므로, 리뷰 글의 칭찬·불만 단어로 별점을 추정해 넣습니다(불만 2, 칭찬 5, 둘 다 3, 둘 다 없으면 별점 없음) |
+| 말투 | 학습에 말투 지시가 없었고, 사이트가 늘 보내는 "정중하고 따뜻하게"를 넣으면 답글이 더 어색해져서 기본은 쓰지 않습니다. `serve.json`에 `"use_tone": true`를 넣으면 다시 씁니다 |
 | 돌려주는 것 | `reply`(답글), `sentiment`(positive/neutral/negative), `keywords` |
 | 인증 | 요청 헤더 `x-internal-key` = 이 서버의 환경 변수 `AI_INTERNAL_KEY`. 백엔드가 고객응대에 쓰는 키(`AI_CUSTOMER_INTERNAL_KEY`, 안 정하면 `AI_INTERNAL_KEY`)와 같은 값 |
 | 상태 확인 | 표준 gRPC 헬스체크. 백엔드가 2초마다 확인하는 그 방식이라 키 없이도 응답합니다 |
 | 사진 | 아직 안 받습니다. proto에 사진 칸이 없습니다. 서버 코드는 준비되어 있습니다(RESEARCH_LOG 할 일 참고) |
 
-- **감정(`sentiment`)** 은 별점으로 정합니다: 4~5점은 positive, 3점과 0점(모름)은 neutral, 1~2점은 negative. 백엔드 가짜 답과 같은 규칙입니다.
+- **감정(`sentiment`)** 은 별점으로 정합니다: 4~5점은 positive, 3점과 0점(모름)은 neutral, 1~2점은 negative. 백엔드 가짜 답과 같은 규칙입니다. 별점이 없으면 위의 추정 별점으로 정합니다.
 - **키워드(`keywords`)** 는 정해 둔 주제 목록(배달 지연, 음식 온도, 누락, 맛 등)에서 리뷰에 나온 것을 고릅니다.
 - **가게 정보**: `data/store_docs/<store_id>/` 폴더가 있으면 그 문서를 씁니다. 없으면 백엔드가 보낸 가게 이름·업종·지역·주소로 짧은 문서를 만들어 씁니다. 백엔드 `store_id`(숫자)를 실험용 가게 폴더에 연결하려면 `configs/serve.json`의 `store_aliases`에 `{"1": "bunsik-01"}`처럼 적습니다.
 - 답글은 GPU에서 한 번에 하나씩 만듭니다. 기다리는 요청이 32개를 넘으면 "혼잡" 오류(`RESOURCE_EXHAUSTED`)를 돌려주고, 백엔드는 "AI가 혼잡합니다"를 보여 줍니다.

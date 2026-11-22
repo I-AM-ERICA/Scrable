@@ -26,6 +26,7 @@ once the backend adds one, save it to a temporary file and pass its path as imag
 import argparse
 import hmac
 import json
+import re
 import logging
 import os
 import signal
@@ -39,13 +40,16 @@ from types import SimpleNamespace
 
 from .config import Config
 from .pipeline import generation_messages
-from .types import Review
+from .types import Document, Review
 
 log = logging.getLogger("scrable.serve")
 
 SERVICE_NAME = "america.ai.v1.CustomerAssistant"
 MAX_REVIEW_CHARS = 2000  # Same limit as the backend's ReplyDraftRequest.reviewText.
 MAX_TONE_CHARS = 30
+MAX_STORE_INFO_CHARS = 2000  # Same limit as the backend's ReplyDraftRequest.storeInfo.
+OWNER_LINES = 2  # lines of the owner's store info given to the model per review
+OWNER_HEADER = "가게 정보 (사장님이 등록한 내용이며, 손님이 주문한 메뉴가 아닙니다)"
 
 # Review topics for the "keywords" field: keyword -> substrings that signal it. Simple and
 # predictable on purpose; the order is the output order.
@@ -63,6 +67,53 @@ KEYWORDS = {
     "요청사항": ("요청사항", "요청한", "요청했"),
     "재주문": ("또 시킬", "또 주문", "또 올", "또 갈", "재주문", "단골", "다음에 또"),
 }
+
+
+# Complaint and praise words, used only when the backend sends no star rating (the site does not
+# send one yet). Every training input had a rating, and without one replies came out wrong (thanking
+# the customer for a complaint), so a rating guessed from the text goes in instead.
+NEGATIVE_CUES = (
+    "늦", "식어", "식었", "미지근", "차가웠", "별로", "실망", "불친절", "아쉽", "아쉬", "최악", "불편", "불만",
+    "환불", "교환", "반품", "누락", "빠졌", "빠져", "안 왔", "안왔", "이물질", "머리카락", "들떴", "들뜨",
+    "새서", "쏟아", "파손", "깨져", "망가", "엉망", "답이 없", "기다렸", "길어요", "오래 걸", "비싸", "짜요",
+    "싱거", "안 좋", "안좋",
+)
+POSITIVE_CUES = (
+    "맛있", "좋아", "좋았", "좋네", "좋고", "좋은", "친절", "만족", "최고", "감사", "예쁘", "이쁘", "깨끗",
+    "깔끔", "꼼꼼", "푸짐", "넉넉", "추천", "맘에 들", "마음에 들", "또 올", "또 갈", "또 시킬", "또 주문",
+    "재주문", "단골", "잘 잘",
+)
+
+
+def estimated_rating(text):
+    """Star rating guessed from a review sent without one: 2 complaint, 5 praise, 3 both (mixed
+    reviews such as "맛있는데 늦었어요"), None when neither shows (the input then has no rating)."""
+    negative = any(cue in text for cue in NEGATIVE_CUES)
+    positive = any(cue in text for cue in POSITIVE_CUES)
+    if negative and positive:
+        return 3
+    if negative:
+        return 2
+    if positive:
+        return 5
+    return None
+
+
+def required_text(line):
+    """The sentence after "필수:" on a store-info line (the owner wants it in every reply), else ""."""
+    head, sep, rest = line.strip().partition(":")
+    return rest.strip() if sep and head.strip() in ("필수", "[필수]") else ""
+
+
+def menu_in_review(line, review_text):
+    """A store-info line as given, except a menu line ("메뉴: 떡볶이, 김밥 ...") keeps only the dishes the
+    review itself names, or is dropped (""). Menu names the review does not mention never reach the
+    model, which otherwise took the menu for the customer's order."""
+    if "메뉴" not in line.split(":")[0]:
+        return line
+    head, _, items = line.partition(":")
+    named = [item.strip() for item in re.split(r"[,，·/]", items) if item.strip() and item.strip() in review_text]
+    return f"{head.strip()}: {', '.join(named)}" if named else ""
 
 
 def sentiment_of(rating):
@@ -93,6 +144,9 @@ class ServeConfig:
     port: int = 50053
     workers: int = 8  # gRPC threads; generation itself runs one at a time
     max_waiting: int = 32  # queued DraftReply calls before RESOURCE_EXHAUSTED
+    # Add the backend's tone ("- 답글 말투: ...") to the prompt. Off: no training input had one, and
+    # with the site's fixed "정중하고 따뜻하게" the replies got worse (repeated phrases).
+    use_tone: bool = False
 
     def __post_init__(self):
         self.config = Config(**self.base)
@@ -104,6 +158,8 @@ class ServeConfig:
             isinstance(k, str) and isinstance(v, str) for k, v in self.store_aliases.items()
         ):
             raise ValueError("store_aliases must map store_id strings to folder names")
+        if not isinstance(self.use_tone, bool):
+            raise ValueError("use_tone must be true or false")
         for name in ("port", "workers", "max_waiting"):
             if type(getattr(self, name)) is not int or getattr(self, name) < 1:
                 raise ValueError(f"{name} must be a positive integer")
@@ -131,16 +187,41 @@ class ReplyEngine:
         self._gpu = threading.Lock()
         self._slots = threading.BoundedSemaphore(scfg.max_waiting)
 
-    def chunks(self, store_key, text, store):
-        found = self.retriever.retrieve(text, store_key, self.scfg.config.top_k) if store_key else []
-        if found:
-            return found
+    def chunks(self, store_key, text, store, store_info=""):
+        """Store documents for the reply model's retrieved_documents. Store info the owner wrote on
+        the customer page comes first (chunked like data/store_docs and ranked for this review);
+        otherwise the documents_dir folder of the store; otherwise none. The backend's basic store
+        fields are added whenever no folder document was found."""
+        found = []
+        if store_info.strip():
+            found = [self.owner_document(store_key, text, store_info)]
+        elif store_key:
+            found = self.retriever.retrieve(text, store_key, self.scfg.config.top_k)
+            if found:
+                return found
         info = store_document(store)
-        return (
-            [SimpleNamespace(id=f"store-{store_key or 'unknown'}", source="backend StoreContext", text=info)]
-            if info
-            else []
-        )
+        if info:
+            found = [*found, SimpleNamespace(id=f"store-{store_key or 'unknown'}", source="backend StoreContext",
+                                             text=info)]
+        return found
+
+    def owner_document(self, store_key, review_text, store_info):
+        """One store document from the owner's store info: only the OWNER_LINES lines most related to
+        this review (BM25 + embedding), under a header saying it is store info. Given the whole text,
+        the 1.5B read a menu line as the customer's order and named those dishes in the reply."""
+        from .rag import rank_chunks
+
+        lines = [part.strip(" -·•") for line in store_info.splitlines() for part in line.split(" / ")]
+        lines = [kept for line in lines if line and not required_text(line)
+                 and (kept := menu_in_review(line, review_text))]
+        if not lines:
+            lines = ["(이 리뷰와 관련된 가게 정보 없음)"]
+        pieces =[Document(f"owner-{i}", line, store_key or "unknown-store", "owner") for i, line in enumerate(lines)]
+        chosen = rank_chunks(review_text, pieces, getattr(self.retriever, "embedder", None), OWNER_LINES)
+        chosen = sorted(chosen, key=lambda piece: int(piece.id.split("-")[1]))  # keep the owner's order
+        body = "\n".join(f"- {piece.text}" for piece in chosen)
+        return SimpleNamespace(id=f"owner-{store_key or 'unknown'}", source="사장님이 입력한 가게 정보",
+                               text=f"{OWNER_HEADER}\n{body}")
 
     def describe(self, image, store_key):
         """Photo description for the reply model, or None (no photo, no vision model, or it failed:
@@ -154,14 +235,16 @@ class ReplyEngine:
             log.warning("Photo description failed (%s); replying without it", type(error).__name__)
             return None
 
-    def draft(self, store, review_text, rating, tone="", image=None):
+    def draft(self, store, review_text, rating, tone="", image=None, store_info=""):
         """{'reply', 'sentiment', 'keywords'} for one review. store = StoreContext fields as a dict;
-        image = path to the customer's photo, or None."""
+        image = path to the customer's photo, or None; store_info = store info the owner wrote."""
         if not self._slots.acquire(blocking=False):
             raise Busy
         try:
             store_id = store.get("store_id", "").strip()
             store_key = self.scfg.store_aliases.get(store_id, store_id)
+            if not 1 <= rating <= 5:  # 0 = not sent: guess it from the text (see NEGATIVE_CUES)
+                rating = estimated_rating(review_text) or 0
             review = Review(
                 f"grpc-{uuid.uuid4().hex[:12]}",
                 review_text,
@@ -169,15 +252,18 @@ class ReplyEngine:
                 rating=rating if 1 <= rating <= 5 else None,
             )
             prompt = self.prompt
-            if tone.strip():
+            if self.scfg.use_tone and tone.strip():
                 prompt += f"\n- 답글 말투: {tone.strip()[:MAX_TONE_CHARS]}"
-            chunks = self.chunks(store_key, review_text, store)
+            chunks = self.chunks(store_key, review_text, store, store_info)
             with self._gpu:
                 description = self.describe(image, store_key)
                 messages = generation_messages(prompt, review, chunks, photo_description=description)
                 reply = self.llm.complete(messages, max_tokens=self.scfg.config.response_tokens).strip()
             if not reply:
                 raise RuntimeError("empty reply")
+            required = [text for line in store_info.splitlines() if (text := required_text(line))]
+            if required:  # the owner's must-say sentences, added word for word (not left to the model)
+                reply = reply + "\n\n" + " ".join(required)
             return {"reply": reply, "sentiment": sentiment_of(rating), "keywords": keywords_of(review_text)}
         finally:
             self._slots.release()
@@ -206,7 +292,9 @@ def make_servicer(engine):
             }
             start = time.perf_counter()
             try:
-                result = engine.draft(store, text, request.rating, request.tone)
+                result = engine.draft(
+                    store, text, request.rating, request.tone, store_info=request.store_info[:MAX_STORE_INFO_CHARS]
+                )
             except Busy:
                 context.abort(grpc.StatusCode.RESOURCE_EXHAUSTED, "too many reviews waiting; retry shortly")
             except Exception:  # Never send review text or stack traces back; log the type only.

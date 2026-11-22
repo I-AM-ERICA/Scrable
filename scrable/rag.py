@@ -71,6 +71,30 @@ def tokens(text):
     return re.findall(r"\w+", text.casefold()) or ["<empty>"]
 
 
+def rank_chunks(query, chunks, embedder, top_k):
+    """The top_k of a few ad-hoc chunks (store info sent with a request), scored like
+    HybridRetriever: BM25 and, when an embedder is given, dense similarity, fused by rank."""
+    from rank_bm25 import BM25Okapi
+
+    if len(chunks) <= top_k:
+        return list(chunks)
+
+    def bigrams(text):  # Korean particles split whole words ("누락은" vs "누락됐어요"); bigrams still match
+        words = tokens(text)
+        return [w[i : i + 2] for w in words for i in range(max(len(w) - 1, 1))] or ["<empty>"]
+
+    scores = [BM25Okapi([bigrams(c.text) for c in chunks]).get_scores(bigrams(query))]
+    if embedder is not None:
+        vectors = np.asarray(embedder.encode([c.text for c in chunks] + [query]), dtype=np.float32)
+        vectors /= np.maximum(np.linalg.norm(vectors, axis=1, keepdims=True), 1e-12)
+        scores.append(vectors[:-1] @ vectors[-1])
+    fused = [0.0] * len(chunks)
+    for values in scores:
+        for rank, i in enumerate(sorted(range(len(chunks)), key=lambda j: (-float(values[j]), j)), 1):
+            fused[i] += 1 / (60 + rank)
+    return [chunks[i] for i in sorted(range(len(chunks)), key=lambda i: (-fused[i], i))[:top_k]]
+
+
 class HybridRetriever:
     def __init__(self, chunks, embedder, directory):
         from rank_bm25 import BM25Okapi

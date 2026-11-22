@@ -1,6 +1,7 @@
 """Interchangeable real LLM backends, persistent request cache and JSON validation."""
 
 import json
+import os
 import re
 import threading
 from pathlib import Path
@@ -50,14 +51,16 @@ class LocalLLM:
             )
         self.device = device
         self.context_tokens = context_tokens
+        # SCRABLE_CPU_BF16=1: bfloat16 on CPU (half the memory, about 2x faster on a laptop than float32).
+        cpu_bf16 = device == "cpu" and os.environ.get("SCRABLE_CPU_BF16") == "1"
         dtype = (
             torch.bfloat16
-            if device.startswith("cuda") and torch.cuda.is_bf16_supported()
+            if (device.startswith("cuda") and torch.cuda.is_bf16_supported()) or cpu_bf16
             else torch.float16
             if device.startswith("cuda") or device == "mps"
             else torch.float32
         )
-        print(f"Loading {model} on {device} (CPU can be very slow)...", flush=True)
+        print(f"Loading {model} on {device} ({dtype}; CPU can be very slow)...", flush=True)
         self.tokenizer = AutoTokenizer.from_pretrained(model, trust_remote_code=False)
         self.model = AutoModelForCausalLM.from_pretrained(
             model,
@@ -81,6 +84,8 @@ class LocalLLM:
         }
         if adapter:  # Absent without an adapter, so stage-1 cache keys stay valid.
             self.identity["adapter"] = adapter_identity(adapter)
+        if cpu_bf16:  # Absent otherwise, so existing cache keys stay valid.
+            self.identity["cpu_dtype"] = "bfloat16"
 
     def _encode(self, messages, max_tokens):
         text = self.tokenizer.apply_chat_template(

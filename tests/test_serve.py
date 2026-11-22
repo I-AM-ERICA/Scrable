@@ -5,7 +5,15 @@ import threading
 
 import pytest
 
-from scrable.serve import Busy, ReplyEngine, ServeConfig, keywords_of, sentiment_of, store_document
+from scrable.serve import (
+    Busy,
+    ReplyEngine,
+    ServeConfig,
+    estimated_rating,
+    keywords_of,
+    sentiment_of,
+    store_document,
+)
 from scrable.types import Document
 
 grpc = pytest.importorskip("grpc")
@@ -63,12 +71,70 @@ def test_engine_uses_store_documents_alias_or_store_context():
     assert by_alias["reply"].endswith("(docs=1)") and by_alias["sentiment"] == "negative"
     assert json.loads(llm.messages[-1][1]["content"])["retrieved_documents"][0]["id"] == "d1"
     fallback = eng.draft(
-        {"store_id": "99", "name": "새가게", "category": "카페"}, "맛있어요", 0, tone="친근하게"
+        {"store_id": "99", "name": "새가게", "category": "카페"}, "그냥 그래요", 0, tone="친근하게"
     )
     payload = json.loads(llm.messages[-1][1]["content"])
-    assert fallback["reply"].endswith("(docs=1)") and "rating" not in payload  # 0 = unknown rating
+    assert fallback["reply"].endswith("(docs=1)") and "rating" not in payload  # 0 and no cue: unknown
+    assert fallback["sentiment"] == "neutral"
     assert "가게 이름: 새가게" in payload["retrieved_documents"][0]["text"]
+    assert "답글 말투" not in llm.messages[-1][0]["content"]  # tone is off by default (untrained)
+    toned = ReplyEngine(ServeConfig(base=BASE, use_tone=True), llm, FakeRetriever([]), "기본 프롬프트")
+    toned.draft({"store_id": "99", "name": "새가게"}, "그냥 그래요", 0, tone="친근하게")
     assert llm.messages[-1][0]["content"].startswith("기본 프롬프트\n- 답글 말투: 친근하게")
+
+
+def test_store_info_from_the_owner_becomes_the_store_document():
+    llm = FakeLLM()
+    eng = engine(llm, aliases={"7": "bunsik-01"})
+    info = "메뉴: 떡볶이, 김밥, 순대\n영업시간 11:00~21:00 / 월요일 휴무\n누락은 매장 전화로 알려 주시면 확인 후 다시 보내 드립니다."
+    eng.draft({"store_id": "7", "name": "우리분식", "category": "분식"}, "배달이 누락됐어요 전화 드렸어요", 2,
+              store_info=info)
+    docs = json.loads(llm.messages[-1][1]["content"])["retrieved_documents"]
+    assert docs[0]["source"] == "사장님이 입력한 가게 정보"
+    lines = docs[0]["text"].splitlines()
+    assert lines[0].startswith("가게 정보") and "주문한 메뉴가 아닙니다" in lines[0]
+    assert len(lines) == 3 and any("누락은 매장 전화" in line for line in lines)  # header + 2 chosen lines
+    assert "가게 이름: 우리분식" in docs[-1]["text"]  # basic store fields still come along
+    assert all("단무지" not in d["text"] for d in docs)  # the folder document is not used
+    eng.draft({"store_id": "7"}, "김밥이 빠졌어요", 2, store_info="   ")  # blank: folder documents as before
+    assert json.loads(llm.messages[-1][1]["content"])["retrieved_documents"][0]["id"] == "d1"
+
+
+def test_menu_names_only_from_the_review_and_required_lines_are_appended():
+    llm = FakeLLM()
+    eng = engine(llm)
+    info = ("메뉴: 떡볶이, 김밥, 순대\n누락은 매장 전화로 알려 주세요\n"
+            "필수: 리뷰 이벤트 참여 감사드려요! 다음 주문 때 음료를 서비스로 드려요.")
+    result = eng.draft({"store_id": "x"}, "떡볶이가 너무 매웠어요", 2, store_info=info)
+    text = json.loads(llm.messages[-1][1]["content"])["retrieved_documents"][0]["text"]
+    assert "떡볶이" in text and "김밥" not in text and "순대" not in text
+    assert "리뷰 이벤트" not in text  # required sentences are not sent to the model
+    assert result["reply"].endswith("\n\n리뷰 이벤트 참여 감사드려요! 다음 주문 때 음료를 서비스로 드려요.")
+    eng.draft({"store_id": "x"}, "직원분이 친절해요", 5, store_info="메뉴: 떡볶이, 김밥")
+    text = json.loads(llm.messages[-1][1]["content"])["retrieved_documents"][0]["text"]
+    assert "떡볶이" not in text and "관련된 가게 정보 없음" in text
+
+
+def test_long_store_info_is_ranked_for_the_review():
+    from scrable.rag import rank_chunks
+
+    chunks = [Document(f"c{i}", text, "s", "x") for i, text in enumerate(["영업시간 11시부터", "배달 누락 안내 전화", "주차 가능"])]
+    assert [c.id for c in rank_chunks("배달이 누락됐어요 전화 주세요", chunks, None, 1)] == ["c1"]
+    assert rank_chunks("아무거나", chunks[:2], None, 2) == chunks[:2]
+
+
+def test_missing_rating_is_guessed_from_the_review_text():
+    assert estimated_rating("원장님이 꼼꼼하게 잘 잘라 주셨어요") == 5
+    assert estimated_rating("젤네일이 사흘 만에 들떴어요. 아쉽네요") == 2
+    assert estimated_rating("맛있는데 배달이 늦었어요") == 3
+    assert estimated_rating("포장해 갑니다") is None
+    llm = FakeLLM()
+    eng = engine(llm)
+    result = eng.draft({"store_id": "bunsik-01"}, "단무지가 빠져서 왔어요", 0)
+    assert result["sentiment"] == "negative"
+    assert json.loads(llm.messages[-1][1]["content"])["rating"] == 2
+    sent = eng.draft({"store_id": "bunsik-01"}, "단무지가 빠져서 왔어요", 4)  # a sent rating wins
+    assert sent["sentiment"] == "positive" and json.loads(llm.messages[-1][1]["content"])["rating"] == 4
 
 
 class FakeDescriber:
@@ -131,6 +197,8 @@ def test_serve_config_validation():
         ServeConfig(base={**BASE, "backend": "anthropic", "model": "m"})
     with pytest.raises(ValueError, match="store_aliases"):
         ServeConfig(base=BASE, store_aliases={"1": 2})
+    with pytest.raises(ValueError, match="use_tone"):
+        ServeConfig(base=BASE, use_tone="yes")
 
 
 @pytest.fixture
@@ -161,6 +229,8 @@ def test_grpc_round_trip_key_health_and_validation(server):
     result = call(server, KEY, review_text="배달이 늦어서 식었어요", rating=2)
     assert result.reply.endswith("(docs=1)") and result.sentiment == "negative"
     assert list(result.keywords) == ["배달 지연", "음식 온도"]
+    with_info = call(server, KEY, review_text="배달이 늦었어요", rating=2, store_info="메뉴: 떡볶이\n배달 문의는 매장 전화")
+    assert with_info.reply.endswith("(docs=1)")  # the owner's store info replaces the folder document
     for key in ("wrong-key", None):
         with pytest.raises(grpc.RpcError) as denied:
             call(server, key, review_text="맛있어요", rating=5)
