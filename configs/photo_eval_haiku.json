@@ -1,0 +1,16 @@
+{
+  "_comment": "Photo test, ceiling check: Claude Haiku writes the reply from exactly the same photo descriptions as outputs/photo_eval_stage4 (1.5B + photo adapter, Vision-3B descriptions). Shows whether the photo score is held back by the 1.5B or by the descriptions/test itself. Haiku also judges, so it may score a little high. --split all.",
+  "backend": "anthropic",
+  "model": "claude-haiku-5-5",
+  "judge_backend": "anthropic",
+  "judge_model": "claude-haiku-5-5",
+  "judge_workers": 4,
+  "custom_data": "data/photo_reviews_v2.jsonl",
+  "documents_dir": "data/store_docs",
+  "base_prompt_file": "prompts/stage4_prompt.txt",
+  "embedding_model": "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+  "knowledge_size": 0,
+  "top_k": 2,
+  "output_dir": "outputs/photo_eval_haiku",
+  "photo_descriptions_from": "outputs/photo_eval_stage4/all_predictions.json"
+}
